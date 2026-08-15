@@ -196,11 +196,11 @@ Scoring: 1–5 against our constraints. **Buildable** = 2-person + Claude, days-
 
 | Concept | Buildable | Clippable | Co-play | MAYA | Adult-fun | Total |
 |---|---|---|---|---|---|---|
-| **A. Creature Night-Shelter** (care + defend) | 4 | 5 | 5 | 5 | 4 | **23** |
+| **A. Creature Shelter** (care + defend) | 4 | 5 | 5 | 5 | 4 | **23** |
 | B. Short-run "Nights" roguelike (pure survival) | 4 | 4 | 5 | 3 | 4 | 20 |
 | C. Anomaly-check shift game (Animal Hospital-like) | 5 | 5 | 4 | 2 | 4 | 20 |
 
-### ⭐ Concept A (recommended): "Creature Night-Shelter" — working title
+### ⭐ Concept A (recommended): "Creature Shelter" — working title
 You run a rescue shelter for cute creatures deep in a spooky forest. **By day** (~3 min): find lost creatures out in the woods and carry them home, feed/heal/clean them, fuel the generator/lantern, board up weak points. **By night** (~1.5 min): the forest comes for your creatures — keep the lights fed, defend the shelter, survive. **The twist that makes it ours:** some rescued creatures are *wrong* (anomaly-check at the shelter door — eyes, teeth, behavior). Take in a fake and it sabotages you from the inside at night. Survive escalating nights (e.g., a 10-night run ≈ 20–25 min); lose → run ends → lobby shows your best nights above your head; teammates revive downed players; solo mode gets a self-revive item and gentler night scaling.
 
 **Why this wins:** it is *literally* the blend requested — 99 Nights' night-defense tension + Animal Hospital's creepy-cute care and anomaly reveal — while attacking 99 Nights' documented weaknesses (20-hour commitment → 25-minute runs; weak solo → solo-tuned scaling) and dodging pure-clone death with a real MAYA twist (care + betrayal-from-within). Every night is a clip; every anomaly reveal is a clip; every "the bunny we adopted ate the generator" is a TikTok. Care tasks + defense roles split naturally across 1–4 friends (co-play signal), and it monetizes cleanly (revive token, 2x coins, cosmetic creature skins/lanterns — all fixed-outcome).
@@ -226,7 +226,7 @@ You run a rescue shelter for cute creatures deep in a spooky forest. **By day** 
 
 ## 7. Open Decisions / Next Steps
 
-- [ ] **Team picks the concept** (recommendation: A — Creature Night-Shelter)
+- [ ] **Team picks the concept** (recommendation: A — Creature Shelter)
 - [ ] Name the game (needs an all-ages, clippable, searchable name)
 - [ ] Claude builds the v1 vertical slice: lobby + day/night loop + 1 creature + 1 monster + generator/lantern + revive + basic HUD
 - [ ] Asset pass: free low-poly forest/creature packs from Creator Store; Meshy for the 1–2 hero creatures/monsters
