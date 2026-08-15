@@ -1,0 +1,5 @@
+# Toolchain manager config — install Rokit from https://github.com/rojo-rbx/rokit
+# then run `rokit install` in this folder to get the right tool versions.
+
+[tools]
+rojo = "rojo-rbx/rojo@7.4.4"
