@@ -1725,6 +1725,14 @@ local function handleCommand(player: Player, message: string)
 		if manifest.ribbonPrompt then
 			toast(player, "walk to the spool; or use prompt — granting via spool trigger not simulated")
 		end
+	elseif cmd == "/sound" then
+		-- audio test: /sound <CueName> plays it for everyone (fills the audio-test-board role)
+		local SoundKit = require(Shared:WaitForChild("SoundKit")) :: any
+		local cue = args[2]
+		if cue then
+			SoundKit.play(cue)
+			toast(player, "played cue " .. cue .. " (silence = id still 0 in SoundConfig)")
+		end
 	elseif cmd == "/endrun" then
 		S.ShiftManager.debugEndRun()
 		toast(player, "run ended")
