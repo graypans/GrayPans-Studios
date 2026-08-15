@@ -8,6 +8,7 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config")) :: any
 local Util = require(Shared:WaitForChild("Util")) :: any
 local Classes = require(Shared:WaitForChild("Defs"):WaitForChild("Classes")) :: any
+local ServerKind = require(Shared:WaitForChild("ServerKind")) :: any
 
 local LobbyService = {}
 
@@ -140,6 +141,16 @@ end
 
 function LobbyService.init(context: any)
 	ctx = context
+
+	-- MapBuilder creates BOTH lobbySpawn and workshopSpawn with Enabled=true (the latter so a live
+	-- reserved shift server, which has no lobbySpawn at all, always has somewhere to land the
+	-- instant it boots). In same-server mode / a public lobby server, both spawns exist at once and
+	-- nothing else disables the workshop one before the very first character spawns -- without this,
+	-- Roblox's spawn selection could legitimately place a fresh join in either room at random. Force
+	-- the correct LobbyIdle spawn state here, as early in server boot as ctx.manifest allows.
+	if not ServerKind.isReservedShiftServer() then
+		LobbyService.setShiftSpawnActive(false)
+	end
 
 	Players.PlayerAdded:Connect(function(player)
 		player.CharacterAdded:Connect(function(char)
