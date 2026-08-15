@@ -363,14 +363,81 @@ Hearing friends scream is a proven clip engine (Lethal Company's proximity voice
 
 ## 8. Open Decisions / Next Steps
 
-- [ ] **Team picks the concept** (recommendation: A — Creature Shelter; niche verified unoccupied as of Aug 2026, see §2.6)
+- [x] **Team picked the concept: D, evolved** — the Mortuary Assistant loop, rethemed (not toy *repair*). Full port design in §9
+- [ ] **Team picks the theme skin** (§9.4: haunted dolls vs. creepy-cute creatures) and the name (§9.5)
 - [ ] **Sign a simple founders' agreement** (IP ownership, revenue split, exit terms) — team drama killed Apeirophobia and Forsaken; failure pattern #3
-- [ ] Name the game (needs an all-ages, clippable, searchable name)
-- [ ] Claude builds the v1 vertical slice: lobby + day/night loop + 1 creature + 1 monster + generator/lantern + revive + basic HUD
-- [ ] Asset pass: free low-poly forest/creature packs from Creator Store; Meshy for the 1–2 hero creatures/monsters
+- [ ] Claude builds the v1 vertical slice (§9.6)
+- [ ] Asset pass: free low-poly interior packs from Creator Store; Meshy for the mascot + patient characters
 - [ ] Icon/thumbnail concepts (ChatGPT image gen → pick best 2 for A/B)
 - [ ] Compliance checklist (§3.5)
 - [ ] Write the 4-week post-launch update calendar
+
+---
+
+## 9. CHOSEN DIRECTION — "The Assistant" (working title): Mortuary Assistant → Roblox Port Design
+
+**Decision state:** the team picked Concept D's loop as the game, rethemed away from toy repair. Theme skin (dolls vs. creatures) and final name still open — candidates in §9.4/§9.5. The Sea-of-Thieves-style two-queue idea (1–2 player small site, 3–4 player large site) carries over from the Concept E discussion.
+
+### 9.1 The original loop, in its entirety (The Mortuary Assistant, DarkStone Digital 2022)
+
+Solo dev, one small building (~6 rooms), ~$3–5.6M gross, CoryxKenshin's video ~15M views, Markiplier series, its own film adaptation. A shift works like this:
+
+1. **Arrive → paperwork → 3 bodies in cold storage.** One is host to a demon. Process all three while deducing which.
+2. **The task chain (per body, 11 steps, order-gated):** wire jaw → eye caps → mix 5 fluids into the pump (forgetting the special *Reagent* silently voids the ritual later) → incision → clamp tubing → run pump (a *wait state* — this is when you watch the bodies) → suture → cavity fluid → clean the machine → cosmetics → return to storage.
+3. **The deduction layer, running in parallel:**
+   - *Which body?* — "tells": twitching, eyes reopening, position changes between glances, marks appearing over time. **Crucially, the demon fires FAKE tells on innocent bodies to frame them** — you weigh frequency + intensity per body, never trusting one event. Certainty is engineered to never reach 100%.
+   - *Which demon?* — carry a **letting strip** that smokes near hidden sigils (hot/cold detector); find 4 sigils (spawns randomized nightly); match their ordered sequence against a 12-demon reference database on the office computer.
+4. **The burn — one irreversible decision per shift:** target body fully processed *with Reagent* + correct 4-sigil Mark placed on it → cremate. Right = banished. Wrong body, wrong sigils, missing reagent, or timer expiry = **possession ending** (the demon takes you).
+5. **The clock is a hidden possession meter,** not a wall clock: fills constantly, accelerates after the 3rd body, and *surges if you rush* (anti-speedrun rubber-band). You read it diegetically by scribbling on a notepad — your doodles degrade from straight lines to the demon's own symbol as possession deepens.
+6. **The Haunt System:** a large randomized pool of scare events (peripheral figures, audio, moved objects, fake tells) drawn fresh each run and **gated by the meter tier** — quiet early, hallucination set-pieces late. Dev's design thesis: "tension through routine" — scares fire during wait-states and in your peripheral vision, while your hands are busy center-screen.
+7. **Replay:** demon, host body, sigil spawns, and haunt draws re-randomize every run; 6 endings + drip-fed lore; knowledge is the progression (veterans process bodies faster, freeing attention for deduction — and the rubber-band pushes back).
+
+### 9.2 Why this loop is perfect for us
+
+- **Dual-attention is the whole game**: busy hands + scanning eyes. It's mechanically scary (survives low-poly, per §2.8 porting rule #2), needs zero gore to work, and every interaction is a tap-and-hold minigame (mobile-native, rule #4)
+- **One tiny map** (~6 rooms) — the smallest art scope of any concept on our board
+- **Engineered uncertainty + one irreversible group decision** = the Phasmophobia/Among Us argument engine, on camera, every round
+- **The fail state is the jump scare** — no combat to build, no gore to rate
+
+### 9.3 The Roblox port blueprint (theme-agnostic)
+
+| Original | Our port | Notes |
+|---|---|---|
+| Rebecca (assistant) | The players (1–4), new hires of the **mascot boss** | Job title = the game's name |
+| The mortuary | One small workshop/clinic building; small site (1–2p) & large site (3–4p) queues | Sea of Thieves model; large site has more rooms + more patients |
+| 3 cadavers/shift | **3–5 "patients"/shift** (dolls or creatures), scaling with player count | "Patient" = the unit of the brag stat |
+| 11-step embalm chain | **6–8-step care chain** per patient, order-gated, each step a 5–15s touch minigame | v1: 6 steps; add steps in updates |
+| The demon | **The Hollow One** (or theme equivalent) — 12 spirit identities in a lookup book | 12 identities = content lever, launch with 6 |
+| Possession meter + notepad doodles | **The Presence meter**, read diegetically: lobby music detunes, lights flicker more, your character's hummed tune goes wrong, drawings on the wall change | Never show a bar; the *room* is the meter |
+| Tells + fake tells | Identical system: real tells on the marked patient, framed tells on innocents | The core deduction, ported 1:1 |
+| Letting strips + 4 sigils + database | **A detector toy/compass** that rattles near hidden **glyph tokens**; match ordered glyphs in the boss's ledger | Invent original cartoon glyphs — no real occult symbols (maturity questionnaire + policy safety) |
+| Reagent in the fluid mix | A **special final care step** (e.g., a silver ribbon/bell) that must be included or the banish silently fails | Preserves the "did we do EVERYTHING right" dread |
+| The burn (cremate) | **The Banish Box / Moonlight Door** — wheel the chosen patient in, all players confirm, slam it | Group-confirm = the argument clip; no fire, no destruction of a cute thing on screen |
+| Possession ending | The Presence takes the shift: lights out, mascot's true face, **shift counter resets** | The jump scare IS the fail state |
+| Hallucination set-pieces | Short **"taken" sequences**: one player is briefly pulled into a dark mirror-room minigame, friends see them sleepwalking | Co-op twist: friends can wake them (revive-equivalent) |
+| Haunt System pool | Same architecture: event pool × meter tier × random draw; ship ~15 events at launch, add per update | Each new haunt event is clip fuel |
+| 6 endings + lore | Shift-milestone story beats (notes from previous assistants; the boss's secret) | Cheap: text + staging |
+
+**Structure & counters (the team's requirement):**
+- Runs measured in **Shifts** — endless, escalating (Animal Hospital model: players chase "Shift 50"). **Best Shift + total Patients cleared display above heads in the lobby**
+- Per shift: process all patients + banish correctly → shift survived → next shift harder (more patients, faster Presence, subtler tells, more fake tells)
+- **One mistake doesn't end the run**: a wrong banish or missed reagent-step triggers a scare + a "strike" (sanity-style); the run ends on meter max. Softer than the original's instant fail — kid-friendlier, and preserves "how far can we get without messing up" as a *perfect-shift* bonus stat
+- Session: ~5–8 min per shift, natural stopping points, 15–25 min typical sessions
+- **Co-op split (the loop's natural roles):** task-runner(s) on the care chain, detector-carrier hunting glyphs, everyone watching for tells — then one group decision. Solo: fewer patients, slower meter, all roles yours
+
+### 9.4 Theme skins (team decision)
+
+- **Skin 1 — Haunted Dolls: "The Dollmaker's Assistant."** Patients = dolls prepared for adoption (brush hair, paint face, dress, wind the music box, tie the silver ribbon). Boss/mascot = **The Dollmaker**. Scariest per dollar; dolls are TikTok's favorite horror aesthetic; add the *moves-when-unwatched* rule as a tell type
+- **Skin 2 — Creepy-cute creatures: "The Night Nanny" / "The Keeper's Assistant."** Patients = baby cryptids at a night nursery (feed, burp, brush, tuck in, nightlight). Boss/mascot = **The Keeper**. Warmer, broader kid appeal, pet-attachment betrayal ("MR. SNUFFLES WAS THE HOLLOW ONE"); slightly closer to Animal Hospital's turf
+- Either way: patients are **nameable** (clippability item #1), and the mascot's "true face" is our Deer-equivalent meme export
+
+### 9.5 Name candidates
+
+"The Dollmaker's Assistant" · "The Toymaker's Assistant" · "The Night Nanny" · "The Keeper's Assistant" · "Night Shift" variants. Rule: job title that implies the boss; boss is the mascot; all-ages words only (no "demon/blood/death" in title — §3.2 requires all-ages metadata).
+
+### 9.6 v1 vertical slice (build target)
+
+Lobby (stats above heads) → 1 small site → 3 patients → 6-step care chain → tells + 1 fake tell → detector + 3 glyphs vs 6-identity ledger → Presence meter with 2 haunt tiers (~8 events) → Banish Box group-confirm → shift counter + recap card → mobile + PC input. Two-queue and the large site come after the slice proves fun.
 
 ---
 
