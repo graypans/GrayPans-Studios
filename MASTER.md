@@ -163,6 +163,43 @@ The Home page "Recommended For You" is the dominant acquisition source. Confirme
 
 ---
 
+### 2.8 The Steam-to-Roblox pipeline — mining old viral YouTube horror
+
+The formula: take a game YouTubers (Markiplier, Jacksepticeye, CoryxKenshin, 8-BitRyan) made viral, add a twist, rebuild it Roblox-native. It's already the platform's most reliable hit machine:
+
+| Steam/indie original | YouTube pedigree | Roblox descendant | Result |
+|---|---|---|---|
+| Papers Please (2013) → That's Not My Neighbor (2024) | Every major LPer | **Animal Hospital** (+ consequences twist) | 1.85B visits |
+| Spooky's Jump Scare Mansion (2014) | Markiplier era | **DOORS** | 7.2B visits |
+| SCP-3008 lore | SCP fandom | **3008** | ~3.2B visits |
+| Lethal Company (2023) | Dominated Twitch/YT winter 2023-24 | **99 Nights in the Forest** (loop DNA) | 14.2M peak CCU |
+| Phasmophobia (2020) | #6 on Twitch Oct 2020 | **Specter 1/2** | 235M+ visits |
+| R.E.P.O. (Feb 2025) | 271K Steam CCU | **E.R.P.O.** (clone, shipped in weeks) | 33M visits |
+
+**Why some loops port and others don't** (structural rules from the audit):
+1. **Session shape is destiny** — 10–20 min rounds + between-round shop ports; 60-minute expeditions don't
+2. **The dread must come from mechanics** (timers, resource triage, turn order, audio cues), because fidelity-based fear (photoreal gore, lighting) evaporates in low-poly
+3. **Voice-comedy loops lose their engine** on Roblox (voice is 13+/ID-gated) — loops with mechanical dread keep full power
+4. **One-button interactions port to touch**; physics-grab loops get clumsy on mobile
+5. **Speed matters**: post-Steam-viral mining windows close in weeks (E.R.P.O.) — but **un-mined 2016–2024 loops are durable arbitrage**, because their audiences are proven and nobody is racing you
+
+**The mining audit — what's taken and what's open:**
+
+*Occupied (don't touch):* FNAF (Forgotten Memories 125M+), Granny (651M), Baldi's Basics (181M), Spooky's (→DOORS), Backrooms (→Apeirophobia), Phasmophobia (→Specter), Lethal Company (4+ clones), R.E.P.O. (→E.R.P.O.), Choo-Choo Charles (→Dead Rails + 62M-visit clone), Poppy Playtime, Slender, Amanda the Adventurer (61M, shallow).
+
+*Un-mined or under-mined — the opportunity list, ranked* (pedigree × Roblox vacancy × fit to our constraints):
+
+1. **Tattletail (2016) — care-based horror.** ⭐ The single best find of this pass. Feed/brush/recharge a needy Furby-like toy whose care tasks *make noise* while its "Mama" hunts you by sound. Markiplier/Jack/DanTDM Christmas 2016 wave. Its 100M-visit Roblox adaptation was legally forced to strip all Tattletail content (IP owner refused a license) and became a non-horror hangout — **demand proven, mechanic vacant for 9 years. This is direct evidence for the Creature Shelter thesis: care-under-threat has a massive proven audience and no Roblox owner.**
+2. **Devour (2021) — the care-ritual carry loop.** Catch and carry creatures one at a time to a goal while a jump-scare antagonist accelerates. A 5-year streamer staple (Markiplier/Jack replay every map), zero Roblox equivalent. The catch-carry-deliver verb slots directly into Creature Shelter's rescue phase.
+3. **Content Warning (2024) — film-for-views.** 6.2M downloads in 24h; un-mined. "Grow your in-game SpookTube channel by filming cryptids" is both mechanic and marketing flywheel. Caveat: Roblox has no real replay tech — footage must be faked (scripted playback), a medium-hard build.
+4. **The Mortuary Assistant (2022) → reskinned "Haunted Toy Workshop."** Possession-deduction shift work (which toy is possessed? decide before dawn) — un-mined because the corpse surface can't ship on Roblox, which is exactly the opening. Grafts onto the checking-game lineage Animal Hospital rode, with a fresher deduction twist.
+5. **Iron Lung (2022) — blind crew submarine.** No dominant Roblox version; Markiplier + film pedigree. Upgrades naturally to 1–4 co-op stations (blind pilot / map-only navigator / leak-patching engineer / photographer). One interior set = tiny art scope. "No window, trust your navigator" is streamer catnip.
+6. **Buckshot Roulette (2023) × Liar's Bar (2024) — turn-based table dread.** 4M copies + 113K CCU pedigree; only shovelware clones on Roblox (literal gun content caps their discoverability). Kid-safe reskin — jack-in-the-box / cursed party cannon keeps the live/blank turn-dread math. The most mobile-friendly, cheapest-to-build format on this list.
+7. **Kletka (2025) — the hungry elevator.** Descend a gigastructure in a man-eating elevator you must feed; loot floors between descents. Weak raw pedigree but the most Roblox-shaped structure imaginable (an elevator IS a lobby + round timer + difficulty ladder). "The elevator ate Dave" is high-TikTok.
+8. **Dark Deception (2018) — co-op maze-chase.** Markiplier-driven kid-heavy fandom, begged-for co-op, zero Roblox adaptation despite its own DLC crossing over with Piggy and DOORS.
+9. **Emily Wants to Play (2015) — rule-based doll freeze-tag.** Each doll adds one movement rule (freeze when watched / never look / keep moving); rules stack into emergent chaos. Only a tiny tribute exists on Roblox.
+10. **Nuclear Nightmare (2024) — infected expedition.** Co-op survival trek where one player secretly becomes the monster — fuses 99 Nights' survival appetite with MM2's traitor paranoia; no current hit combines them.
+
 ## 3. Platform Rules — VERIFIED (this section is official policy, not lore)
 
 ### 3.1 The "16+ plays" claim: **TRUE** ✅
@@ -250,20 +287,28 @@ Compliance rules: answer for the most extreme content in the game; **retake the 
 
 Scoring: 1–5 against our constraints. **Buildable** = 2-person + Claude, days-to-playable. **Clippable** = jump-scare/meme moment frequency. **Co-play** = feeds the 2026 co-play algorithm signal. **MAYA** = familiar + one novel twist (not a clone). **Adult-fun** = survives the 60-day 16+ trial gate.
 
+*The concept space is deliberately wider than the 99 Nights × Animal Hospital box — D–G below come from the Steam-mining pass (§2.8).*
+
 | Concept | Buildable | Clippable | Co-play | MAYA | Adult-fun | Total |
 |---|---|---|---|---|---|---|
-| **A. Creature Shelter** (care + defend) | 4 | 5 | 5 | 5 | 4 | **23** |
+| **A. Creature Shelter** (care + defend + anomaly) | 4 | 5 | 5 | 5 | 4 | **23** |
 | B. Short-run "Nights" roguelike (pure survival) | 4 | 4 | 5 | 3 | 4 | 20 |
 | C. Anomaly-check shift game (Animal Hospital-like) | 5 | 5 | 4 | 2 | 4 | 20 |
+| **D. Haunted Toy Workshop** (Mortuary Assistant reskin: repair toys, deduce the possessed one) | 5 | 5 | 4 | 4 | 4 | **22** |
+| **E. Blind Crew Submarine** (Iron Lung × co-op stations) | 4 | 4 | 5 | 5 | 5 | **23** |
+| F. Cursed Party Roulette (Buckshot/Liar's Bar table dread, jack-in-the-box reskin) | 5 | 5 | 3 | 4 | 5 | 22 |
+| G. Hungry Elevator (Kletka descent, feed-or-be-eaten) | 4 | 5 | 4 | 4 | 4 | 21 |
 
 ### ⭐ Concept A (recommended): "Creature Shelter" — working title
 You run a rescue shelter for cute creatures deep in a spooky forest. **By day** (~3 min): find lost creatures out in the woods and carry them home, feed/heal/clean them, fuel the generator/lantern, board up weak points. **By night** (~1.5 min): the forest comes for your creatures — keep the lights fed, defend the shelter, survive. **The twist that makes it ours:** some rescued creatures are *wrong* (anomaly-check at the shelter door — eyes, teeth, behavior). Take in a fake and it sabotages you from the inside at night. Survive escalating nights (e.g., a 10-night run ≈ 20–25 min); lose → run ends → lobby shows your best nights above your head; teammates revive downed players; solo mode gets a self-revive item and gentler night scaling.
 
 **Why this wins:** it is *literally* the blend requested — 99 Nights' night-defense tension + Animal Hospital's creepy-cute care and anomaly reveal — while attacking 99 Nights' documented weaknesses (20-hour commitment → 25-minute runs; weak solo → solo-tuned scaling) and dodging pure-clone death with a real MAYA twist (care + betrayal-from-within). **Validation from the wider-net pass (§2.6): no game on Roblox currently combines care + night defense + hidden anomalies** — the anomaly-checking half is crowded, but this combination is open, and every mechanic in the concept appears in the proven toolkit. Every night is a clip; every anomaly reveal is a clip; every "the bunny we adopted ate the generator" is a TikTok. Care tasks + defense roles split naturally across 1–4 friends (co-play signal), and it monetizes cleanly (revive token, 2x coins, cosmetic creature skins/lanterns — all fixed-outcome).
 
-**Concept B** is the safest build but is a direct 99 Nights subset — weakest differentiation. **Concept C** is the easiest build with the best clip cadence, but it's a near-clone of a 3-month-old megahit; clones get no algorithmic lift.
+**The Steam-mining pass strengthened A rather than replacing it.** Two of the top three un-mined loops slot directly into Creature Shelter: **Tattletail's** care-tasks-make-noise-while-hunted mechanic (proven audience, vacant on Roblox for 9 years) becomes the shelter's night-care tension, and **Devour's** catch-carry-deliver verb becomes the daytime rescue phase. Concept A is now backed by four evidence lines: 99 Nights (night defense), Animal Hospital (creepy-cute + anomaly), Tattletail (care-under-threat), Devour (carry-rescue).
 
-*(Final concept choice = team decision — this doc recommends A.)*
+**On the runners-up:** **E (Blind Crew Submarine)** ties A at 23 — it's the most original and most streamer-baity concept on the list, but loses the tiebreak: it's weakest solo (the vision requires solo-friendly), its station roles need 3–4 coordinated players to shine, and it fits the stated vision (survival, days counter, revives, lobby) less directly. It's the strongest *second game* candidate for the studio. **D (Toy Workshop)** and **F (Party Roulette)** are the cheapest builds on the board and both would make excellent fast-follow or fallback projects if A's slice doesn't feel fun. **Concept B** is a direct 99 Nights subset — weakest differentiation. **C** is a near-clone of a megahit in a subgenre now drowning in clones.
+
+*(Final concept choice = team decision — this doc recommends A, with E earmarked as the studio's second game.)*
 
 ---
 
