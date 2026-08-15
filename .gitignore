@@ -4,6 +4,9 @@
 *.rbxm
 *.rbxmx
 
+# ...except the committed beta place file the team double-clicks to play
+!dist/*.rbxlx
+
 # Roblox Studio lock files
 *.rbxl.lock
 *.rbxlx.lock

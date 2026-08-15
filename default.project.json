@@ -1,5 +1,5 @@
 {
-  "name": "GrayPans-Studios",
+  "name": "ProjectPorcelain",
   "tree": {
     "$className": "DataModel",
 
@@ -23,12 +23,26 @@
         "Client": {
           "$path": "src/client"
         }
+      },
+      "$properties": {
+        "CharacterWalkSpeed": 14
       }
     },
 
     "Workspace": {
       "$properties": {
-        "FilteringEnabled": true
+        "StreamingEnabled": false
+      }
+    },
+
+    "Lighting": {
+      "$properties": {
+        "Technology": "ShadowMap",
+        "Brightness": 1,
+        "ClockTime": 0,
+        "GlobalShadows": true,
+        "Ambient": [0.1058, 0.0901, 0.1215],
+        "OutdoorAmbient": [0.0705, 0.0627, 0.0901]
       }
     },
 

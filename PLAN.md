@@ -37,11 +37,11 @@ Solo-first (the team's first test is solo Play), up to 4-player co-op. Mobile-fr
 ## 4. THE BUILD — milestone checklist
 
 ### M0 — Toolchain FIRST (validation strategy for the whole night)
-- [ ] Download rojo 7.4.4 + luau analyzer binaries directly from GitHub release URLs (verified reachable; rokit needs the blocked API — skipped in container, rokit.toml kept for team machines) **[CLAUDE]**
-- [ ] `rojo build` the scaffold immediately; keep it green after every milestone **[CLAUDE]**
-- [ ] GitHub Actions workflow: rokit → rojo build → `.rbxlx` artifact on every push (backup path to a place file) **[CLAUDE]**
-- [ ] `dist/` exception in .gitignore; built `.rbxlx` committed every milestone so "download → double-click" always works **[CLAUDE]**
-- [ ] Fix default.project.json per R8 **[CLAUDE]**
+- [x] Download rojo 7.4.4 + luau analyzer binaries directly from GitHub release URLs (verified reachable; rokit needs the blocked API — skipped in container, rokit.toml kept for team machines) **[CLAUDE]**
+- [x] `rojo build` the scaffold immediately; keep it green after every milestone **[CLAUDE]**
+- [x] GitHub Actions workflow: rokit → rojo build → `.rbxlx` artifact on every push (backup path to a place file) **[CLAUDE]**
+- [x] `dist/` exception in .gitignore; built `.rbxlx` committed every milestone so "download → double-click" always works **[CLAUDE]**
+- [x] Fix default.project.json per R8 **[CLAUDE]**
 
 ### M1 — TRACER BULLET: the loop closes (tag `m1-loop`)
 *Minimal form of every beat, fully wired: state machine + 1 doll + 1 care step + auto-filled ledger + banish + recap. If the night died here, the team could still play a round.*
