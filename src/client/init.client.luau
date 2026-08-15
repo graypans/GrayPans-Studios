@@ -1,10 +1,10 @@
---[[
-	Main client entry point.
-	Everything in src/client runs on each player's device.
-]]
+--!strict
+-- Client bootstrap (placeholder while controllers are built; final wiring lands with M1 integration).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Config = require(ReplicatedStorage.Shared.Config)
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
 
-print(("[%s] Client started (v%s)"):format(Config.GameName, Config.Version))
+Util.log(("client up — v%s"):format(Config.Version))

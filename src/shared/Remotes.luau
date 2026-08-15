@@ -5,7 +5,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
-local Util = require(script.Parent:WaitForChild("Util"))
+local Util = require(script.Parent.Util)
 
 export type RemoteKind = "Event" | "Unreliable"
 
@@ -52,16 +52,24 @@ end
 
 function Remotes.init()
 	assert(RunService:IsServer(), "Remotes.init is server-only")
-	local folder = ReplicatedStorage:FindFirstChild(FOLDER_NAME)
-	if not folder then
-		folder = Instance.new("Folder")
-		folder.Name = FOLDER_NAME
-		folder.Parent = ReplicatedStorage
+	local folder: Instance
+	local existing = ReplicatedStorage:FindFirstChild(FOLDER_NAME)
+	if existing then
+		folder = existing
+	else
+		local created = Instance.new("Folder")
+		created.Name = FOLDER_NAME
+		created.Parent = ReplicatedStorage
+		folder = created
 	end
 	for name, kind in DEFS do
 		if not folder:FindFirstChild(name) then
-			local class = if kind == "Unreliable" then "UnreliableRemoteEvent" else "RemoteEvent"
-			local remote = Instance.new(class)
+			local remote: Instance
+			if kind == "Unreliable" then
+				remote = Instance.new("UnreliableRemoteEvent")
+			else
+				remote = Instance.new("RemoteEvent")
+			end
 			remote.Name = name
 			remote.Parent = folder
 		end

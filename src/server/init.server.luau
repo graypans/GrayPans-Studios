@@ -1,20 +1,12 @@
---[[
-	Main server entry point.
-	Everything in src/server runs on the Roblox server only.
-]]
+--!strict
+-- Server bootstrap (placeholder while services are built; final wiring lands with M1 integration).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Config = require(ReplicatedStorage.Shared.Config)
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
 
-print(("[%s] Server started (v%s)"):format(Config.GameName, Config.Version))
-
-local Players = game:GetService("Players")
-
-Players.PlayerAdded:Connect(function(player)
-	print(("[%s] %s joined the game"):format(Config.GameName, player.Name))
-end)
-
-Players.PlayerRemoving:Connect(function(player)
-	print(("[%s] %s left the game"):format(Config.GameName, player.Name))
-end)
+Remotes.init()
+Util.log(("server up — v%s (%s)"):format(Config.Version, Config.BuildStamp))

@@ -1,0 +1,1090 @@
+<roblox version="4">
+  <Item class="Lighting" referent="0">
+    <Properties>
+      <string name="Name">Lighting</string>
+      <Color3 name="Ambient">
+        <R>0.1058</R>
+        <G>0.0901</G>
+        <B>0.1215</B>
+      </Color3>
+      <float name="Brightness">1</float>
+      <float name="ClockTime">0</float>
+      <bool name="GlobalShadows">true</bool>
+      <Color3 name="OutdoorAmbient">
+        <R>0.0705</R>
+        <G>0.0627</G>
+        <B>0.0901</B>
+      </Color3>
+      <token name="Technology">3</token>
+    </Properties>
+  </Item>
+  <Item class="ReplicatedStorage" referent="1">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="Folder" referent="2">
+      <Properties>
+        <string name="Name">Remotes</string>
+      </Properties>
+    </Item>
+    <Item class="Folder" referent="3">
+      <Properties>
+        <string name="Name">Shared</string>
+      </Properties>
+      <Item class="ModuleScript" referent="4">
+        <Properties>
+          <string name="Name">Config</string>
+          <string name="Source"><![CDATA[--!strict
+-- All tunables for Project Porcelain live here. The team edits values; code never hardcodes them.
+
+local Config = {
+	Version = "0.1.0-beta",
+	BuildStamp = "dev", -- overwritten at build time by tools/stamp.sh
+
+	-- Debug (R7). Turn DebugMode off before any public test.
+	DebugMode = true,
+	DebugAllowlist = {} :: { string }, -- empty = any player may use debug commands while DebugMode is true
+
+	-- Feature kill switches (R3)
+	Features = {
+		DataStore = true, -- persistence layer probes availability itself; false = memory-only
+		FakeTells = true,
+		Detector = true,
+		Naming = true, -- doll naming UI (default names still assigned when off)
+		FreeTextNames = false, -- curated picker only for the beta; filtered free text post-review
+		Taken = false, -- Taken haunt stub, off by default per plan review
+		PanicEmote = true,
+	},
+
+	Lobby = {
+		ReadyCountdownSeconds = 10,
+		BillboardMaxDistance = 60,
+	},
+
+	Shift = {
+		BaseDollCount = 3,
+		SoloDollCap = 3, -- solo never exceeds this regardless of escalation
+		MaxDollCount = 5,
+		DollCountShiftMilestones = { 4, 8 }, -- +1 doll at each of these shift numbers (multiplayer only)
+		IntroSeconds = 8,
+		ResultSeconds = 8,
+		-- Watchdogs (R2): hard ceilings per state; on expiry the state force-advances with a warning
+		Watchdog = {
+			ShiftIntro = 20,
+			ShiftActive = 900, -- 15 min ceiling on one shift
+			BanishStaging = 30,
+			ShiftResult = 25,
+			RunEnd = 30,
+		},
+		StrikeLimit = 3,
+	},
+
+	Care = {
+		MinigameSeconds = 12, -- watchdog per minigame; auto-release lock on expiry (R2)
+		PromptDistance = 8,
+		StepSeconds = { -- rough target duration per minigame type
+			mash = 6,
+			hold = 5,
+			sequence = 10,
+			timing = 8,
+		},
+	},
+
+	Presence = {
+		Max = 100,
+		BaseFillPerSecond = 0.10, -- ~16 quiet minutes to max; escalation multiplies this
+		LastDollAccelMultiplier = 2.0, -- after every doll's care chain is done
+		RushSurge = { -- anti-rush rubber band: surge added when steps complete too fast
+			WindowSeconds = 20,
+			StepsInWindow = 4,
+			SurgeAmount = 6,
+			DecayPerSecond = 0.25,
+		},
+		StrikeSurge = 12,
+		WrongBanishSurge = 15,
+		Tiers = { 25, 55, 85 }, -- tier 0 below first threshold; tiers gate haunts + ambience
+	},
+
+	Tells = {
+		BaseIntervalSeconds = { min = 20, max = 40 }, -- marked doll fires a real tell within this window
+		FakeTellChancePerWindow = 0.35, -- chance an innocent fires a framed tell in the same window; escalates
+		WatchReportHz = 8, -- client camera stream rate
+		WatchFovDegrees = 70,
+		WatchMaxDistance = 60,
+	},
+
+	Glyphs = {
+		PerShift = 3,
+		CollectDistance = 10,
+		DetectorMaxRange = 40, -- rattle starts inside this range
+	},
+
+	Banish = {
+		SoloConfirmSeconds = 10,
+		MajorityTimerSeconds = 30,
+	},
+
+	Haunts = {
+		Enabled = true,
+		MinSecondsBetween = 25,
+		-- per-event kill switches (R3); event ids must match Defs/Haunts
+		Events = {
+			SilhouetteDoorway = true,
+			DoorCreakSlam = true,
+			LightsOutBeat = true,
+			DollHeadSnap = true,
+			WhisperPass = true,
+			WindowFigure = true,
+			MusicBoxSwell = true,
+			BenchRattle = true,
+			Taken = false, -- mirrors Features.Taken
+		},
+	},
+
+	Data = {
+		StoreName = "PorcelainStatsV1",
+		ReadRetries = 3,
+		RetryBackoffSeconds = 2,
+	},
+}
+
+return Config
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Folder" referent="5">
+        <Properties>
+          <string name="Name">Defs</string>
+        </Properties>
+        <Item class="ModuleScript" referent="6">
+          <Properties>
+            <string name="Name">CareSteps</string>
+            <string name="Source"><![CDATA[--!strict
+-- The care chain. The 5 LISTED steps show on the HUD; the silver ribbon is deliberately
+-- NOT listed (the forgettable "reagent" — taught once on the lobby chalkboard, MASTER.md 9.3).
+-- minigame kinds: "mash" (tap fast), "hold" (hold steady), "sequence" (tap in order), "timing" (tap in the zone)
+
+export type CareStep = {
+	id: string,
+	order: number,
+	name: string,
+	verb: string, -- objective phrasing
+	minigame: "mash" | "hold" | "sequence" | "timing",
+}
+
+local Steps: { CareStep } = {
+	{ id = "Brush", order = 1, name = "Brush Hair", verb = "Brush the hair smooth", minigame = "mash" },
+	{ id = "Eyes", order = 2, name = "Polish Eyes", verb = "Polish both eyes", minigame = "hold" },
+	{ id = "Face", order = 3, name = "Paint Face", verb = "Paint the face", minigame = "sequence" },
+	{ id = "Dress", order = 4, name = "Dress", verb = "Button the dress coat", minigame = "timing" },
+	{ id = "MusicBox", order = 5, name = "Wind Music Box", verb = "Wind the music box", minigame = "hold" },
+}
+
+-- The hidden sixth act. Not part of Steps on purpose: not on the HUD checklist,
+-- required by the banish. Its absence is discovered the hard way.
+local Ribbon = {
+	id = "Ribbon",
+	name = "Tie the Silver Ribbon",
+}
+
+local byId: { [string]: CareStep } = {}
+for _, step in Steps do
+	byId[step.id] = step
+end
+
+return {
+	list = Steps,
+	byId = byId,
+	Ribbon = Ribbon,
+}
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="7">
+          <Properties>
+            <string name="Name">DollNames</string>
+            <string name="Source"><![CDATA[--!strict
+-- Curated, pre-safe doll names (no filtering needed). Used for the tap-to-pick namer
+-- and for default names at spawn so the reveal card is never blank (plan review fix).
+
+local Names: { string } = {
+	"Mr. Buttons",
+	"Prudence",
+	"Patches",
+	"Miss Marigold",
+	"Barnaby",
+	"Clementine",
+	"Sir Stitch",
+	"Poppet",
+	"Winnifred",
+	"Cobbler",
+	"Duchess Thistle",
+	"Momo",
+	"Aunt Agatha",
+	"Pip",
+	"Lord Wobble",
+	"Rosalind",
+	"Tick-Tock Tom",
+	"Beatrix",
+	"Humphrey",
+	"Little Nan",
+}
+
+return Names
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="8">
+          <Properties>
+            <string name="Name">Glyphs</string>
+            <string name="Source"><![CDATA[--!strict
+-- Original cartoon glyph set (NO real occult symbols — policy-safe by design, MASTER.md 9.3).
+-- Each glyph is drawn from primitive strokes so it can be rendered as SurfaceGui/ScreenGui Frames
+-- with zero image assets. Coordinates are fractions of a square canvas (0..1), rotation in degrees.
+
+export type Stroke = {
+	x: number, -- center x (0..1)
+	y: number, -- center y (0..1)
+	w: number, -- width  (0..1)
+	h: number, -- height (0..1)
+	rot: number?, -- degrees
+	round: boolean?, -- fully rounded corners (dot / ring segment look)
+}
+
+export type Glyph = {
+	id: string,
+	name: string,
+	strokes: { Stroke },
+}
+
+local Glyphs: { Glyph } = {
+	{
+		id = "MoonHook",
+		name = "Moon Hook",
+		strokes = {
+			{ x = 0.5, y = 0.25, w = 0.5, h = 0.1, rot = 0, round = true },
+			{ x = 0.3, y = 0.5, w = 0.1, h = 0.5, rot = 15, round = true },
+			{ x = 0.62, y = 0.72, w = 0.28, h = 0.1, rot = -30, round = true },
+		},
+	},
+	{
+		id = "TripleTear",
+		name = "Triple Tear",
+		strokes = {
+			{ x = 0.3, y = 0.35, w = 0.12, h = 0.12, round = true },
+			{ x = 0.55, y = 0.5, w = 0.12, h = 0.12, round = true },
+			{ x = 0.4, y = 0.7, w = 0.12, h = 0.12, round = true },
+			{ x = 0.5, y = 0.5, w = 0.66, h = 0.06, rot = 45, round = true },
+		},
+	},
+	{
+		id = "CrookedWindow",
+		name = "Crooked Window",
+		strokes = {
+			{ x = 0.5, y = 0.28, w = 0.5, h = 0.08, rot = 8 },
+			{ x = 0.5, y = 0.72, w = 0.5, h = 0.08, rot = -8 },
+			{ x = 0.28, y = 0.5, w = 0.08, h = 0.5, rot = -8 },
+			{ x = 0.72, y = 0.5, w = 0.08, h = 0.5, rot = 8 },
+			{ x = 0.5, y = 0.5, w = 0.08, h = 0.4, rot = 20 },
+		},
+	},
+	{
+		id = "StitchedHeart",
+		name = "Stitched Heart",
+		strokes = {
+			{ x = 0.38, y = 0.36, w = 0.22, h = 0.22, round = true },
+			{ x = 0.62, y = 0.36, w = 0.22, h = 0.22, round = true },
+			{ x = 0.5, y = 0.6, w = 0.36, h = 0.3, rot = 45 },
+			{ x = 0.5, y = 0.48, w = 0.5, h = 0.05, rot = 12, round = true },
+		},
+	},
+	{
+		id = "BentKey",
+		name = "Bent Key",
+		strokes = {
+			{ x = 0.35, y = 0.32, w = 0.2, h = 0.2, round = true },
+			{ x = 0.35, y = 0.34, w = 0.09, h = 0.09, round = true },
+			{ x = 0.5, y = 0.58, w = 0.09, h = 0.4, rot = -18, round = true },
+			{ x = 0.68, y = 0.74, w = 0.2, h = 0.08, rot = 0, round = true },
+			{ x = 0.62, y = 0.84, w = 0.12, h = 0.08, rot = 0, round = true },
+		},
+	},
+	{
+		id = "HollowStar",
+		name = "Hollow Star",
+		strokes = {
+			{ x = 0.5, y = 0.5, w = 0.55, h = 0.08, rot = 0, round = true },
+			{ x = 0.5, y = 0.5, w = 0.55, h = 0.08, rot = 60, round = true },
+			{ x = 0.5, y = 0.5, w = 0.55, h = 0.08, rot = 120, round = true },
+			{ x = 0.5, y = 0.5, w = 0.14, h = 0.14, round = true },
+		},
+	},
+	{
+		id = "SleepingEye",
+		name = "Sleeping Eye",
+		strokes = {
+			{ x = 0.5, y = 0.5, w = 0.6, h = 0.09, rot = 0, round = true },
+			{ x = 0.3, y = 0.62, w = 0.09, h = 0.2, rot = 30, round = true },
+			{ x = 0.5, y = 0.66, w = 0.09, h = 0.2, rot = 0, round = true },
+			{ x = 0.7, y = 0.62, w = 0.09, h = 0.2, rot = -30, round = true },
+		},
+	},
+	{
+		id = "RibbonCoil",
+		name = "Ribbon Coil",
+		strokes = {
+			{ x = 0.5, y = 0.3, w = 0.44, h = 0.09, rot = -20, round = true },
+			{ x = 0.5, y = 0.5, w = 0.44, h = 0.09, rot = 20, round = true },
+			{ x = 0.5, y = 0.7, w = 0.44, h = 0.09, rot = -20, round = true },
+		},
+	},
+}
+
+local byId: { [string]: Glyph } = {}
+for _, glyph in Glyphs do
+	byId[glyph.id] = glyph
+end
+
+return {
+	list = Glyphs,
+	byId = byId,
+}
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="9">
+          <Properties>
+            <string name="Name">Haunts</string>
+            <string name="Source"><![CDATA[--!strict
+-- Haunt event pool. tier = minimum Presence tier (1..3) before the event can draw.
+-- weight = relative draw chance. cooldown = seconds before the same event may repeat.
+-- Every event has BOTH a sound slot and a visual so the beta reads fully muted (audio ships ID=0).
+-- Implementations live server-side (world changes) + client-side (camera/screen effects), keyed by id.
+
+export type HauntDef = {
+	id: string,
+	tier: number,
+	weight: number,
+	cooldown: number,
+	scope: "world" | "client", -- world = server manipulates instances; client = per-client screen/camera effect
+}
+
+local Haunts: { HauntDef } = {
+	{ id = "BenchRattle", tier = 1, weight = 10, cooldown = 40, scope = "world" },
+	{ id = "DoorCreakSlam", tier = 1, weight = 8, cooldown = 50, scope = "world" },
+	{ id = "MusicBoxSwell", tier = 1, weight = 8, cooldown = 60, scope = "world" },
+	{ id = "WhisperPass", tier = 2, weight = 8, cooldown = 45, scope = "client" },
+	{ id = "SilhouetteDoorway", tier = 2, weight = 7, cooldown = 70, scope = "world" },
+	{ id = "WindowFigure", tier = 2, weight = 6, cooldown = 80, scope = "world" },
+	{ id = "DollHeadSnap", tier = 2, weight = 9, cooldown = 45, scope = "world" },
+	{ id = "LightsOutBeat", tier = 3, weight = 7, cooldown = 90, scope = "world" },
+	{ id = "Taken", tier = 3, weight = 4, cooldown = 180, scope = "client" }, -- stub; off by default (Config)
+}
+
+local byId: { [string]: HauntDef } = {}
+for _, h in Haunts do
+	byId[h.id] = h
+end
+
+return {
+	list = Haunts,
+	byId = byId,
+}
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="10">
+          <Properties>
+            <string name="Name">Spirits</string>
+            <string name="Source"><![CDATA[--!strict
+-- The six spirits of the beta (12 planned; content lever per MASTER.md 9.3).
+-- Each spirit's code is an ORDERED sequence of 3 glyph ids (order matters, like the original's sigil matching).
+
+export type Spirit = {
+	id: string,
+	name: string,
+	code: { string }, -- ordered glyph ids, length 3
+	flavor: string, -- one line in the ledger, readable by kids, adds lore
+}
+
+local Spirits: { Spirit } = {
+	{
+		id = "Hollow",
+		name = "The Hollow One",
+		code = { "SleepingEye", "MoonHook", "HollowStar" },
+		flavor = "It wears what it empties. Check the eyes; the eyes are honest.",
+	},
+	{
+		id = "Latch",
+		name = "Old Latch",
+		code = { "BentKey", "CrookedWindow", "TripleTear" },
+		flavor = "It never uses doors. It IS doors.",
+	},
+	{
+		id = "Thimble",
+		name = "Little Thimble",
+		code = { "StitchedHeart", "RibbonCoil", "SleepingEye" },
+		flavor = "It sews itself in. Look for the extra stitch.",
+	},
+	{
+		id = "Waltz",
+		name = "The Midnight Waltz",
+		code = { "MoonHook", "TripleTear", "SleepingEye" },
+		flavor = "If the music box plays with no hand on the crank, count the dolls twice.",
+	},
+	{
+		id = "Wick",
+		name = "Sister Wick",
+		code = { "HollowStar", "StitchedHeart", "BentKey" },
+		flavor = "It drinks light. Lamps gutter where it sleeps.",
+	},
+	{
+		id = "Patch",
+		name = "Grandfather Patch",
+		code = { "RibbonCoil", "CrookedWindow", "HollowStar" },
+		flavor = "The oldest one. The ribbon remembers him, so tie it well.",
+	},
+}
+
+local byId: { [string]: Spirit } = {}
+for _, spirit in Spirits do
+	byId[spirit.id] = spirit
+end
+
+return {
+	list = Spirits,
+	byId = byId,
+}
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="11">
+          <Properties>
+            <string name="Name">Tells</string>
+            <string name="Source"><![CDATA[--!strict
+-- Tell types. Real tells fire on the marked doll; fake tells fire on innocents (framing).
+-- unwatchedOnly tells require the doll to be unseen by any validated camera (Weeping Angels rule).
+-- Every audio-flavored tell has a visual co-cue (audio ships silent).
+
+export type TellDef = {
+	id: string,
+	weight: number,
+	unwatchedOnly: boolean,
+	fakeable: boolean, -- can the Presence fake this on an innocent doll?
+	description: string, -- shown in the debug overlay / ledger lore page
+}
+
+local Tells: { TellDef } = {
+	{
+		id = "HeadTurn",
+		weight = 10,
+		unwatchedOnly = false,
+		fakeable = true,
+		description = "Its head turns a little toward you.",
+	},
+	{
+		id = "EyesFollow",
+		weight = 9,
+		unwatchedOnly = false,
+		fakeable = true,
+		description = "The eyes track the nearest player for a few seconds.",
+	},
+	{
+		id = "Scoot",
+		weight = 8,
+		unwatchedOnly = true,
+		fakeable = true,
+		description = "It is not where it was. Nobody saw it move.",
+	},
+	{
+		id = "MusicBoxTurn",
+		weight = 6,
+		unwatchedOnly = false,
+		fakeable = true,
+		description = "Its music box crank turns by itself (the crank visibly rotates).",
+	},
+	{
+		id = "Slump",
+		weight = 7,
+		unwatchedOnly = true,
+		fakeable = true,
+		description = "Its posture changed — slumped, or sat up straighter.",
+	},
+	{
+		id = "StitchMark",
+		weight = 4,
+		unwatchedOnly = true,
+		fakeable = false, -- marks never lie, but they are slow to appear (strong evidence, late)
+		description = "A new crooked stitch mark appears on its arm (real dolls only).",
+	},
+}
+
+local byId: { [string]: TellDef } = {}
+for _, t in Tells do
+	byId[t.id] = t
+end
+
+return {
+	list = Tells,
+	byId = byId,
+}
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+      <Item class="Folder" referent="12">
+        <Properties>
+          <string name="Name">Logic</string>
+        </Properties>
+        <Item class="ModuleScript" referent="13">
+          <Properties>
+            <string name="Name">Draw</string>
+            <string name="Source"><![CDATA[--!strict
+-- Pure logic: seeded weighted draws for tells/haunts (no `game` references — unit-tested).
+-- Deterministic given a Random object, so schedules are reproducible in tests.
+
+export type Weighted = { id: string, weight: number }
+
+-- Structural rng type: satisfied by Roblox's Random and by test mocks (keeps this module CLI-testable)
+export type RngLike = {
+	NextNumber: (self: RngLike) -> number,
+	NextInteger: (self: RngLike, min: number, max: number) -> number,
+}
+
+local Draw = {}
+
+-- Weighted pick from candidates; returns nil for an empty/zero-weight pool.
+function Draw.weighted(rng: RngLike, candidates: { Weighted }): string?
+	local total = 0
+	for _, c in candidates do
+		if c.weight > 0 then
+			total += c.weight
+		end
+	end
+	if total <= 0 then
+		return nil
+	end
+	local roll = rng:NextNumber() * total
+	local acc = 0
+	for _, c in candidates do
+		if c.weight > 0 then
+			acc += c.weight
+			if roll <= acc then
+				return c.id
+			end
+		end
+	end
+	return candidates[#candidates].id
+end
+
+-- Pick n distinct entries from list (uniform, seeded). Returns fewer if list is short.
+function Draw.sample<T>(rng: RngLike, list: { T }, n: number): { T }
+	local pool = table.clone(list)
+	local out: { T } = {}
+	for _ = 1, math.min(n, #pool) do
+		local i = rng:NextInteger(1, #pool)
+		table.insert(out, pool[i])
+		table.remove(pool, i)
+	end
+	return out
+end
+
+-- Uniform pick
+function Draw.one<T>(rng: RngLike, list: { T }): T?
+	if #list == 0 then
+		return nil
+	end
+	return list[rng:NextInteger(1, #list)]
+end
+
+return Draw
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="14">
+          <Properties>
+            <string name="Name">Escalation</string>
+            <string name="Source"><![CDATA[--!strict
+-- Pure logic: per-shift difficulty derivation (no `game` references — unit-tested).
+
+export type ShiftParams = {
+	dollCount: number,
+	fakeTellChance: number, -- 0..1 per tell window
+	presenceRateMultiplier: number,
+	tellIntervalMin: number,
+	tellIntervalMax: number,
+	glyphCount: number,
+}
+
+export type EscalationConfig = {
+	BaseDollCount: number,
+	SoloDollCap: number,
+	MaxDollCount: number,
+	DollCountShiftMilestones: { number },
+	BaseFakeTellChance: number,
+	BaseTellIntervalMin: number,
+	BaseTellIntervalMax: number,
+	GlyphsPerShift: number,
+}
+
+local Escalation = {}
+
+function Escalation.forShift(cfg: EscalationConfig, shiftNumber: number, playerCount: number): ShiftParams
+	assert(shiftNumber >= 1, "shiftNumber must be >= 1")
+	assert(playerCount >= 1, "playerCount must be >= 1")
+
+	local dollCount = cfg.BaseDollCount
+	for _, milestone in cfg.DollCountShiftMilestones do
+		if shiftNumber >= milestone then
+			dollCount += 1
+		end
+	end
+	dollCount = math.min(dollCount, cfg.MaxDollCount)
+	if playerCount == 1 then
+		-- R1/solo cap: escalation continues through tells + meter only (plan review fix)
+		dollCount = math.min(dollCount, cfg.SoloDollCap)
+	end
+
+	-- Fake tells ramp: +6% per shift, capped at 75%
+	local fakeTellChance = math.min(cfg.BaseFakeTellChance + 0.06 * (shiftNumber - 1), 0.75)
+
+	-- Presence fills faster each shift: +8% per shift, capped at 3x; solo gets a 25% slower meter
+	local presenceMultiplier = math.min(1 + 0.08 * (shiftNumber - 1), 3)
+	if playerCount == 1 then
+		presenceMultiplier *= 0.75
+	end
+
+	-- Real tells get subtler (less frequent) as shifts climb: interval stretches up to +50%
+	local stretch = math.min(1 + 0.05 * (shiftNumber - 1), 1.5)
+
+	return {
+		dollCount = dollCount,
+		fakeTellChance = fakeTellChance,
+		presenceRateMultiplier = presenceMultiplier,
+		tellIntervalMin = cfg.BaseTellIntervalMin * stretch,
+		tellIntervalMax = cfg.BaseTellIntervalMax * stretch,
+		glyphCount = cfg.GlyphsPerShift,
+	}
+end
+
+return Escalation
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="15">
+          <Properties>
+            <string name="Name">GlyphMatch</string>
+            <string name="Source"><![CDATA[--!strict
+-- Pure logic: ordered glyph-code matching (no `game` references — unit-tested via Luau CLI).
+
+local GlyphMatch = {}
+
+-- Returns true only when slots exactly equal the spirit code, in order.
+function GlyphMatch.matches(code: { string }, slots: { string? }): boolean
+	if #code == 0 then
+		return false
+	end
+	for i, glyphId in code do
+		if slots[i] ~= glyphId then
+			return false
+		end
+	end
+	-- reject extra slotted glyphs beyond the code length
+	for i in slots do
+		if i > #code and slots[i] ~= nil then
+			return false
+		end
+	end
+	return true
+end
+
+-- Given every spirit and the current slots, return the single spirit id that matches, or nil.
+function GlyphMatch.identify(spirits: { { id: string, code: { string } } }, slots: { string? }): string?
+	for _, spirit in spirits do
+		if GlyphMatch.matches(spirit.code, slots) then
+			return spirit.id
+		end
+	end
+	return nil
+end
+
+-- Validation used by tests: every spirit code must reference only defined glyph ids and be unique.
+function GlyphMatch.validateDefs(
+	spirits: { { id: string, code: { string } } },
+	glyphIds: { [string]: any }
+): (boolean, string?)
+	local seen: { [string]: string } = {}
+	for _, spirit in spirits do
+		if #spirit.code ~= 3 then
+			return false, ("spirit %s code length %d ~= 3"):format(spirit.id, #spirit.code)
+		end
+		for _, glyphId in spirit.code do
+			if glyphIds[glyphId] == nil then
+				return false, ("spirit %s references unknown glyph %s"):format(spirit.id, glyphId)
+			end
+		end
+		local key = table.concat(spirit.code, "|")
+		if seen[key] then
+			return false, ("spirits %s and %s share code %s"):format(seen[key], spirit.id, key)
+		end
+		seen[key] = spirit.id
+	end
+	return true, nil
+end
+
+return GlyphMatch
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="16">
+          <Properties>
+            <string name="Name">PresenceMath</string>
+            <string name="Source"><![CDATA[--!strict
+-- Pure logic: the Presence meter (no `game` references — unit-tested).
+-- Constant fill + rush-surge rubber band + last-doll acceleration + event surges.
+
+export type PresenceState = {
+	value: number,
+	surge: number, -- decaying extra fill from rushing
+	stepTimestamps: { number }, -- recent care-step completion times (for rush detection)
+	allDollsDone: boolean,
+}
+
+export type PresenceConfig = {
+	Max: number,
+	BaseFillPerSecond: number,
+	LastDollAccelMultiplier: number,
+	RushWindowSeconds: number,
+	RushStepsInWindow: number,
+	RushSurgeAmount: number,
+	RushDecayPerSecond: number,
+	Tiers: { number },
+}
+
+local PresenceMath = {}
+
+function PresenceMath.new(): PresenceState
+	return {
+		value = 0,
+		surge = 0,
+		stepTimestamps = {},
+		allDollsDone = false,
+	}
+end
+
+-- Record a completed care step at time t; may trigger a rush surge.
+function PresenceMath.onStepCompleted(state: PresenceState, cfg: PresenceConfig, t: number)
+	table.insert(state.stepTimestamps, t)
+	-- drop timestamps outside the window
+	local cutoff = t - cfg.RushWindowSeconds
+	while #state.stepTimestamps > 0 and state.stepTimestamps[1] < cutoff do
+		table.remove(state.stepTimestamps, 1)
+	end
+	if #state.stepTimestamps >= cfg.RushStepsInWindow then
+		state.surge += cfg.RushSurgeAmount
+		table.clear(state.stepTimestamps) -- one surge per burst
+	end
+end
+
+function PresenceMath.addSurge(state: PresenceState, amount: number)
+	state.surge += amount
+end
+
+-- Advance the meter by dt seconds. rateMultiplier comes from Escalation.
+function PresenceMath.step(state: PresenceState, cfg: PresenceConfig, dt: number, rateMultiplier: number)
+	local fill = cfg.BaseFillPerSecond * rateMultiplier
+	if state.allDollsDone then
+		fill *= cfg.LastDollAccelMultiplier
+	end
+	-- surge contributes directly, then decays
+	local surgeSpend = math.min(state.surge, cfg.RushDecayPerSecond * dt * 4)
+	state.surge = math.max(0, state.surge - cfg.RushDecayPerSecond * dt)
+	state.value = math.min(cfg.Max, state.value + fill * dt + surgeSpend)
+end
+
+function PresenceMath.tier(state: PresenceState, cfg: PresenceConfig): number
+	local tier = 0
+	for i, threshold in cfg.Tiers do
+		if state.value >= threshold then
+			tier = i
+		end
+	end
+	return tier
+end
+
+function PresenceMath.isMaxed(state: PresenceState, cfg: PresenceConfig): boolean
+	return state.value >= cfg.Max
+end
+
+return PresenceMath
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
+      <Item class="ModuleScript" referent="17">
+        <Properties>
+          <string name="Name">Remotes</string>
+          <string name="Source"><![CDATA[--!strict
+-- Remote registry (R4): every remote name exists exactly once, here.
+-- Server calls Remotes.init() once to create instances; both sides look up via Remotes.get().
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Util = require(script.Parent.Util)
+
+export type RemoteKind = "Event" | "Unreliable"
+
+local DEFS: { [string]: RemoteKind } = {
+	-- Server -> Client
+	StateChanged = "Event", -- (stateName: string, payload: {}?)  payload includes objective text, shift number
+	ShiftData = "Event", -- (shiftNumber: number, dolls: {DollInfo}) manifest at shift start
+	DollUpdate = "Event", -- (dollId: string, update: {}) care progress / name changes
+	GlyphFound = "Event", -- (glyphId: string, foundList: {string}, finderName: string)
+	PresenceTier = "Event", -- (tier: number) 0..3
+	HauntFired = "Event", -- (hauntId: string, params: {}?) client renders visuals
+	BanishResult = "Event", -- (payload: {correct: boolean, dollName: string, spiritName: string?, strikes: number})
+	Recap = "Event", -- (payload: recap card data)
+	Toast = "Event", -- (message: string, seconds: number?)
+	ReadyCountdown = "Event", -- (secondsLeft: number?) nil cancels
+	MinigameStart = "Event", -- (dollId: string, stepId: string, seed: number) server granted the lock
+	MinigameCancel = "Event", -- (dollId: string, stepId: string) lock expired / released
+	BanishPrompt = "Event", -- (dollId: string, dollName: string) confirm UI open/close
+	DebugInfo = "Event", -- (payload: {}) overlay feed, DebugMode only
+
+	-- Client -> Server
+	RequestMinigame = "Event", -- (dollId: string, stepId: string)
+	MinigameDone = "Event", -- (dollId: string, stepId: string, success: boolean)
+	ChooseName = "Event", -- (dollId: string, choiceIndex: number?, freeText: string?)
+	PickupDoll = "Event", -- (dollId: string)
+	DropDoll = "Event", -- ()
+	DepositDoll = "Event", -- () at the banish box
+	ConfirmBanish = "Event", -- (confirm: boolean)
+	SlotGlyph = "Event", -- (slotIndex: number, glyphId: string?) shared ledger slotting
+	CollectGlyph = "Event", -- (tokenId: string)
+	TieRibbon = "Event", -- (dollId: string)
+	Panic = "Event", -- ()
+	ReadyPad = "Event", -- (standing: boolean) redundancy for pad touch detection
+	CameraReport = "Unreliable", -- (cframe: CFrame) ~8 Hz watched-check stream
+}
+
+local FOLDER_NAME = "Remotes"
+
+local Remotes = {}
+Remotes.Names = {} :: { [string]: string }
+for name in DEFS do
+	Remotes.Names[name] = name
+end
+
+function Remotes.init()
+	assert(RunService:IsServer(), "Remotes.init is server-only")
+	local folder: Instance
+	local existing = ReplicatedStorage:FindFirstChild(FOLDER_NAME)
+	if existing then
+		folder = existing
+	else
+		local created = Instance.new("Folder")
+		created.Name = FOLDER_NAME
+		created.Parent = ReplicatedStorage
+		folder = created
+	end
+	for name, kind in DEFS do
+		if not folder:FindFirstChild(name) then
+			local remote: Instance
+			if kind == "Unreliable" then
+				remote = Instance.new("UnreliableRemoteEvent")
+			else
+				remote = Instance.new("RemoteEvent")
+			end
+			remote.Name = name
+			remote.Parent = folder
+		end
+	end
+end
+
+function Remotes.get(name: string): RemoteEvent
+	assert(DEFS[name] ~= nil, ("Unknown remote '%s' — add it to Remotes.luau"):format(tostring(name)))
+	local folder = Util.waitForChild(ReplicatedStorage, FOLDER_NAME, 15)
+	assert(folder, "Remotes folder missing")
+	local remote = Util.waitForChild(folder, name, 15)
+	assert(remote, ("Remote '%s' missing"):format(name))
+	return remote :: RemoteEvent
+end
+
+return Remotes
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="18">
+        <Properties>
+          <string name="Name">SoundConfig</string>
+          <string name="Source"><![CDATA[--!strict
+-- Every audio cue in the game, one line each. ALL catalog ids ship as 0 (silent no-op) —
+-- the team fills these from the Creator Store in Studio (PLAYTEST.md has the guide).
+-- Only built-in rbxasset:// files are prefilled (safe: they ship with the client).
+-- soundId = 0 means SoundClient skips the cue without erroring.
+
+export type Cue = {
+	soundId: number | string, -- 0 = unset; number = catalog id; string = rbxasset:// path
+	volume: number,
+	looped: boolean?,
+	speed: number?, -- PlaybackSpeed
+}
+
+local SoundConfig: { [string]: Cue } = {
+	-- Ambience (looped beds; tier layers fade in client-side)
+	AmbienceBase = { soundId = 0, volume = 0.4, looped = true }, -- TODO(team): quiet workshop room tone
+	AmbienceTier2 = { soundId = 0, volume = 0.3, looped = true }, -- TODO(team): low unease drone
+	AmbienceTier3 = { soundId = 0, volume = 0.35, looped = true }, -- TODO(team): close, wrong, breathing
+
+	-- The music box (the game's musical signature; also a tell)
+	MusicBoxLoop = { soundId = 0, volume = 0.5, looped = true }, -- TODO(team): music box lullaby
+	MusicBoxDetuned = { soundId = 0, volume = 0.5, looped = true, speed = 0.82 }, -- TODO(team): same lullaby (client detunes)
+
+	-- UI / feedback (built-ins prefilled — these always work)
+	UiClick = { soundId = "rbxasset://sounds/button.wav", volume = 0.6 },
+	UiConfirm = { soundId = "rbxasset://sounds/electronicpingshort.wav", volume = 0.6 },
+	DetectorTick = { soundId = "rbxasset://sounds/snap.mp3", volume = 0.7 },
+
+	-- Care minigames
+	BrushStroke = { soundId = 0, volume = 0.5 }, -- TODO(team): soft brush swish
+	StepDone = { soundId = "rbxasset://sounds/electronicpingshort.wav", volume = 0.5 },
+	RibbonTie = { soundId = 0, volume = 0.6 }, -- TODO(team): delicate chime
+
+	-- Scares (every one has a visual co-cue; silence does not break the game)
+	StingReveal = { soundId = 0, volume = 0.9 }, -- TODO(team): short orchestral sting (banish reveal)
+	StingWrong = { soundId = 0, volume = 0.9 }, -- TODO(team): sour, descending sting (wrong banish)
+	DollmakerScream = { soundId = 0, volume = 1 }, -- TODO(team): THE scream (run-end scare; our Deer)
+	WhisperPass = { soundId = 0, volume = 0.6 }, -- TODO(team): passing whisper L->R
+	DoorSlam = { soundId = 0, volume = 0.8 }, -- TODO(team): heavy door slam
+	BenchRattle = { soundId = 0, volume = 0.7 }, -- TODO(team): wood rattle
+	LightsOut = { soundId = 0, volume = 0.8 }, -- TODO(team): breaker thunk
+
+	-- Emotes
+	PanicBark = { soundId = 0, volume = 0.8 }, -- TODO(team): character yelp ("the characters scream so players don't have to")
+}
+
+return SoundConfig
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="19">
+        <Properties>
+          <string name="Name">Util</string>
+          <string name="Source"><![CDATA[--!strict
+-- Small shared helpers: logging with a consistent prefix, guarded calls, timeout WaitForChild (R4).
+
+local Util = {}
+
+local PREFIX = "[Porcelain]"
+
+function Util.log(...: any)
+	print(PREFIX, ...)
+end
+
+function Util.warn(...: any)
+	warn(PREFIX, ...)
+end
+
+-- pcall wrapper that logs failures and never throws (R3).
+function Util.safeCall<T...>(label: string, fn: (T...) -> ...any, ...: T...): boolean
+	local ok, err = pcall(fn, ...)
+	if not ok then
+		Util.warn(("safeCall '%s' failed: %s"):format(label, tostring(err)))
+	end
+	return ok
+end
+
+-- WaitForChild with a logged timeout instead of an infinite yield (R4).
+function Util.waitForChild(parent: Instance, name: string, timeout: number?): Instance?
+	local child = parent:WaitForChild(name, timeout or 10)
+	if not child then
+		Util.warn(("waitForChild timed out: %s.%s"):format(parent:GetFullName(), name))
+	end
+	return child
+end
+
+-- Shallow copy
+function Util.copy<K, V>(t: { [K]: V }): { [K]: V }
+	local out = {}
+	for k, v in t do
+		out[k] = v
+	end
+	return out
+end
+
+function Util.playerCount(players: { any }): number
+	return #players
+end
+
+return Util
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="20">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="21">
+      <Properties>
+        <string name="Name">Server</string>
+        <token name="RunContext">0</token>
+        <string name="Source"><![CDATA[--!strict
+-- Server bootstrap (placeholder while services are built; final wiring lands with M1 integration).
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+
+Remotes.init()
+Util.log(("server up — v%s (%s)"):format(Config.Version, Config.BuildStamp))
+]]></string>
+      </Properties>
+    </Item>
+  </Item>
+  <Item class="SoundService" referent="22">
+    <Properties>
+      <string name="Name">SoundService</string>
+      <bool name="RespectFilteringEnabled">true</bool>
+    </Properties>
+  </Item>
+  <Item class="StarterPlayer" referent="23">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+      <float name="CharacterWalkSpeed">14</float>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="24">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="25">
+        <Properties>
+          <string name="Name">Client</string>
+          <string name="Source"><![CDATA[--!strict
+-- Client bootstrap (placeholder while controllers are built; final wiring lands with M1 integration).
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+
+Util.log(("client up — v%s"):format(Config.Version))
+]]></string>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+  <Item class="Workspace" referent="26">
+    <Properties>
+      <string name="Name">Workspace</string>
+      <bool name="NeedsPivotMigration">false</bool>
+      <bool name="StreamingEnabled">false</bool>
+    </Properties>
+  </Item>
+</roblox>

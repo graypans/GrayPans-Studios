@@ -14,7 +14,7 @@ function Util.warn(...: any)
 end
 
 -- pcall wrapper that logs failures and never throws (R3).
-function Util.safeCall<T...>(label: string, fn: (T...) -> (), ...: T...)
+function Util.safeCall<T...>(label: string, fn: (T...) -> ...any, ...: T...): boolean
 	local ok, err = pcall(fn, ...)
 	if not ok then
 		Util.warn(("safeCall '%s' failed: %s"):format(label, tostring(err)))
