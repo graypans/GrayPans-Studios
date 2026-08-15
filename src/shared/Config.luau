@@ -3,7 +3,7 @@
 
 local Config = {
 	Version = "0.1.0-beta",
-	BuildStamp = "dev", -- overwritten at build time by tools/stamp.sh
+	BuildStamp = "beta-2026-08-15", -- overwritten at build time by tools/stamp.sh
 
 	-- Debug (R7). Turn DebugMode off before any public test.
 	DebugMode = true,

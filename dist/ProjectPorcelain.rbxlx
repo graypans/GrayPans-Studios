@@ -39,7 +39,7 @@
 
 local Config = {
 	Version = "0.1.0-beta",
-	BuildStamp = "dev", -- overwritten at build time by tools/stamp.sh
+	BuildStamp = "beta-2026-08-15", -- overwritten at build time by tools/stamp.sh
 
 	-- Debug (R7). Turn DebugMode off before any public test.
 	DebugMode = true,
@@ -532,11 +532,56 @@ return {
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="12">
+      <Item class="ModuleScript" referent="12">
+        <Properties>
+          <string name="Name">GlyphRender</string>
+          <string name="Source"><![CDATA[--!strict
+-- Draws a glyph (Defs/Glyphs stroke data) as Frames inside any GuiObject. Zero image assets.
+
+local Glyphs = require(script.Parent.Defs.Glyphs)
+
+local GlyphRender = {}
+
+function GlyphRender.render(glyphId: string, parent: GuiObject, color: Color3?)
+	local glyph = (Glyphs :: any).byId[glyphId]
+	if not glyph then
+		return
+	end
+	local tint = color or Color3.fromRGB(200, 180, 230)
+	for _, stroke in glyph.strokes do
+		local frame = Instance.new("Frame")
+		frame.AnchorPoint = Vector2.new(0.5, 0.5)
+		frame.Position = UDim2.fromScale(stroke.x, stroke.y)
+		frame.Size = UDim2.fromScale(stroke.w, stroke.h)
+		frame.Rotation = stroke.rot or 0
+		frame.BackgroundColor3 = tint
+		frame.BorderSizePixel = 0
+		if stroke.round then
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(1, 0)
+			corner.Parent = frame
+		end
+		frame.Parent = parent
+	end
+end
+
+function GlyphRender.clear(parent: GuiObject)
+	for _, child in parent:GetChildren() do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+end
+
+return GlyphRender
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Folder" referent="13">
         <Properties>
           <string name="Name">Logic</string>
         </Properties>
-        <Item class="ModuleScript" referent="13">
+        <Item class="ModuleScript" referent="14">
           <Properties>
             <string name="Name">Draw</string>
             <string name="Source"><![CDATA[--!strict
@@ -601,7 +646,7 @@ return Draw
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="14">
+        <Item class="ModuleScript" referent="15">
           <Properties>
             <string name="Name">Escalation</string>
             <string name="Source"><![CDATA[--!strict
@@ -671,7 +716,7 @@ return Escalation
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="15">
+        <Item class="ModuleScript" referent="16">
           <Properties>
             <string name="Name">GlyphMatch</string>
             <string name="Source"><![CDATA[--!strict
@@ -736,7 +781,7 @@ return GlyphMatch
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="16">
+        <Item class="ModuleScript" referent="17">
           <Properties>
             <string name="Name">PresenceMath</string>
             <string name="Source"><![CDATA[--!strict
@@ -821,7 +866,7 @@ return PresenceMath
           </Properties>
         </Item>
       </Item>
-      <Item class="ModuleScript" referent="17">
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">Remotes</string>
           <string name="Source"><![CDATA[--!strict
@@ -915,7 +960,7 @@ return Remotes
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="18">
+      <Item class="ModuleScript" referent="19">
         <Properties>
           <string name="Name">SoundConfig</string>
           <string name="Source"><![CDATA[--!strict
@@ -968,7 +1013,73 @@ return SoundConfig
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="19">
+      <Item class="ModuleScript" referent="20">
+        <Properties>
+          <string name="Name">SoundKit</string>
+          <string name="Source"><![CDATA[--!strict
+-- Sound helper honoring the ship-silent rule: cue ids of 0 no-op cleanly (no error spam).
+-- Works on server (world sounds parented to parts) and client (SoundService-parented UI/ambience).
+
+local SoundService = game:GetService("SoundService")
+
+local SoundConfig = require(script.Parent.SoundConfig)
+local Util = require(script.Parent.Util)
+
+local SoundKit = {}
+
+local function resolveId(id: number | string): string?
+	if typeof(id) == "string" then
+		return id -- rbxasset:// built-in
+	end
+	if typeof(id) == "number" and id > 0 then
+		return ("rbxassetid://%d"):format(id)
+	end
+	return nil -- unset (0): silent no-op
+end
+
+-- Create a Sound for a cue, parented where you need it (a part for 3D, SoundService for 2D).
+-- Returns nil when the cue is unset — callers must tolerate nil.
+function SoundKit.attach(cueName: string, parent: Instance): Sound?
+	local cue = SoundConfig[cueName]
+	if not cue then
+		Util.warn(("SoundKit: unknown cue '%s'"):format(cueName))
+		return nil
+	end
+	local id = resolveId(cue.soundId)
+	if not id then
+		return nil
+	end
+	local sound = Instance.new("Sound")
+	sound.Name = "Cue_" .. cueName
+	sound.SoundId = id
+	sound.Volume = cue.volume
+	sound.Looped = cue.looped == true
+	if cue.speed then
+		sound.PlaybackSpeed = cue.speed
+	end
+	sound.Parent = parent
+	return sound
+end
+
+-- Fire-and-forget one-shot. Safe with unset cues. 2D when part is nil.
+function SoundKit.play(cueName: string, part: Instance?)
+	local parent: Instance = part or SoundService
+	local sound = SoundKit.attach(cueName, parent)
+	if not sound then
+		return
+	end
+	sound.PlayOnRemove = false
+	sound:Play()
+	sound.Ended:Once(function()
+		sound:Destroy()
+	end)
+end
+
+return SoundKit
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="21">
         <Properties>
           <string name="Name">Util</string>
           <string name="Source"><![CDATA[--!strict
@@ -1023,16 +1134,16 @@ return Util
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="20">
+  <Item class="ServerScriptService" referent="22">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Script" referent="21">
+    <Item class="Script" referent="23">
       <Properties>
         <string name="Name">Server</string>
         <token name="RunContext">0</token>
         <string name="Source"><![CDATA[--!strict
--- Server bootstrap (placeholder while services are built; final wiring lands with M1 integration).
+-- Server bootstrap: build world, wire services, start the machine.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -1042,31 +1153,3492 @@ local Remotes = require(Shared:WaitForChild("Remotes")) :: any
 local Util = require(Shared:WaitForChild("Util")) :: any
 
 Remotes.init()
-Util.log(("server up — v%s (%s)"):format(Config.Version, Config.BuildStamp))
+
+local ServicesFolder = script:WaitForChild("Services")
+
+local MapBuilder = require(ServicesFolder:WaitForChild("MapBuilder")) :: any
+local DataService = require(ServicesFolder:WaitForChild("DataService")) :: any
+local WatchService = require(ServicesFolder:WaitForChild("WatchService")) :: any
+local DollService = require(ServicesFolder:WaitForChild("DollService")) :: any
+local GlyphService = require(ServicesFolder:WaitForChild("GlyphService")) :: any
+local TellService = require(ServicesFolder:WaitForChild("TellService")) :: any
+local PresenceService = require(ServicesFolder:WaitForChild("PresenceService")) :: any
+local HauntService = require(ServicesFolder:WaitForChild("HauntService")) :: any
+local BanishService = require(ServicesFolder:WaitForChild("BanishService")) :: any
+local LobbyService = require(ServicesFolder:WaitForChild("LobbyService")) :: any
+local ShiftManager = require(ServicesFolder:WaitForChild("ShiftManager")) :: any
+local DebugService = require(ServicesFolder:WaitForChild("DebugService")) :: any
+
+local manifest, failures = MapBuilder.build()
+
+local ctx: any = {
+	rng = Random.new(),
+	manifest = manifest,
+	services = {
+		MapBuilder = MapBuilder,
+		DataService = DataService,
+		WatchService = WatchService,
+		DollService = DollService,
+		GlyphService = GlyphService,
+		TellService = TellService,
+		PresenceService = PresenceService,
+		HauntService = HauntService,
+		BanishService = BanishService,
+		LobbyService = LobbyService,
+		ShiftManager = ShiftManager,
+		DebugService = DebugService,
+	},
+}
+
+local initOrder = {
+	"MapBuilder",
+	"DataService",
+	"WatchService",
+	"DollService",
+	"GlyphService",
+	"TellService",
+	"PresenceService",
+	"HauntService",
+	"BanishService",
+	"LobbyService",
+	"ShiftManager",
+	"DebugService",
+}
+
+for _, name in initOrder do
+	local ok, err = pcall(function()
+		ctx.services[name].init(ctx)
+	end)
+	if not ok then
+		Util.warn(("Service '%s' FAILED to init: %s"):format(name, tostring(err)))
+	end
+end
+
+DollService.wireWorld(manifest)
+
+if #failures > 0 then
+	-- loud on-screen banner for the team (plan review: broken segments must be visible)
+	task.delay(5, function()
+		Remotes.get(Remotes.Names.Toast):FireAllClients(
+			"MAP SEGMENTS FAILED: " .. table.concat(failures, ", ") .. " — screenshot this + Output window",
+			30
+		)
+	end)
+end
+
+Util.log(("server up — v%s (%s), %d map failures"):format(Config.Version, Config.BuildStamp, #failures))
 ]]></string>
       </Properties>
+      <Item class="Folder" referent="24">
+        <Properties>
+          <string name="Name">Services</string>
+        </Properties>
+        <Item class="ModuleScript" referent="25">
+          <Properties>
+            <string name="Name">BanishService</string>
+            <string name="Source"><![CDATA[--!strict
+-- The Banish Box: unlock gating, deposit, group-confirm quorum, resolution handoff.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+
+local BanishService = {}
+
+local ctx: any
+local unlocked = false
+local pending: { dollId: string, confirms: { [Player]: boolean }, generation: number }? = nil
+local generation = 0
+
+local function broadcastPrompt(dollId: string?, dollName: string?, extra: any)
+	Remotes.get(Remotes.Names.BanishPrompt):FireAllClients(dollId, dollName, extra)
+end
+
+local function quorumPlayers(): { Player }
+	local ShiftManager = ctx.services.ShiftManager
+	local participants = ShiftManager.getParticipants()
+	local out = {}
+	for _, player in participants do
+		if player.Parent ~= nil then
+			table.insert(out, player)
+		end
+	end
+	return out
+end
+
+local function resolve()
+	local p = pending
+	if not p then
+		return
+	end
+	pending = nil
+	generation += 1
+	broadcastPrompt(nil, nil, { cancelled = true })
+	Util.safeCall("banishResolve", function()
+		ctx.services.ShiftManager.onBanishResolved(p.dollId)
+	end)
+end
+
+local function cancel()
+	local p = pending
+	if not p then
+		return
+	end
+	pending = nil
+	generation += 1
+	broadcastPrompt(nil, nil, { cancelled = true })
+	-- return the doll to its bench
+	local DollService = ctx.services.DollService
+	local model = DollService.getModel(p.dollId)
+	if model then
+		for _, d in model:GetDescendants() do
+			if d:IsA("BasePart") then
+				d.Transparency = if d.Name == "Root" then 1 else 0
+			elseif d:IsA("SurfaceGui") or d:IsA("BillboardGui") then
+				(d :: any).Enabled = true
+			end
+		end
+	end
+	DollService.setUnlocked(unlocked) -- refresh prompts
+end
+
+local function checkQuorum()
+	local p = pending
+	if not p then
+		return
+	end
+	local players = quorumPlayers()
+	local yes = 0
+	for _, player in players do
+		if p.confirms[player] then
+			yes += 1
+		end
+	end
+	if yes >= #players and #players > 0 then
+		resolve()
+	end
+end
+
+function BanishService.init(context: any)
+	ctx = context
+	local manifest = ctx.manifest
+
+	if manifest.banishPrompt then
+		manifest.banishPrompt.Triggered:Connect(function(player: Player)
+			BanishService.deposit(player)
+		end)
+	end
+
+	Remotes.get(Remotes.Names.ConfirmBanish).OnServerEvent:Connect(function(player: Player, confirm: any)
+		local p = pending
+		if not p then
+			return
+		end
+		if confirm == true then
+			p.confirms[player] = true
+			checkQuorum()
+		elseif confirm == false then
+			cancel()
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		local p = pending
+		if p then
+			p.confirms[player] = nil
+			task.defer(checkQuorum)
+		end
+	end)
+end
+
+function BanishService.setUnlocked(state: boolean)
+	unlocked = state
+	local manifest = ctx.manifest
+	if manifest.banishPrompt then
+		manifest.banishPrompt.Enabled = state and pending == nil
+	end
+	if manifest.banishGlow then
+		TweenService:Create(manifest.banishGlow, TweenInfo.new(1.5), { Brightness = if state then 1.6 else 0 }):Play()
+	end
+	Util.safeCall("dollUnlock", function()
+		ctx.services.DollService.setUnlocked(state)
+	end)
+end
+
+function BanishService.deposit(player: Player)
+	if not unlocked or pending then
+		return
+	end
+	local DollService = ctx.services.DollService
+	local dollId = DollService.getCarried(player)
+	if not dollId then
+		Remotes.get(Remotes.Names.Toast):FireClient(player, "Pick up the doll you suspect first.", 3)
+		return
+	end
+	DollService.drop(player)
+	-- doll appears inside the box
+	local model = DollService.getModel(dollId)
+	local boxBase = ctx.manifest.banishBox and ctx.manifest.banishBox.PrimaryPart
+	if model and boxBase then
+		model:PivotTo(boxBase.CFrame * CFrame.new(0, 1.2, 0))
+		for _, d in model:GetDescendants() do
+			if d:IsA("ProximityPrompt") then
+				d.Enabled = false
+			end
+		end
+	end
+	if ctx.manifest.banishPrompt then
+		ctx.manifest.banishPrompt.Enabled = false
+	end
+
+	generation += 1
+	local myGen = generation
+	pending = { dollId = dollId, confirms = {}, generation = myGen }
+	local dollName = DollService.getDisplayName(dollId)
+	broadcastPrompt(dollId, dollName, nil)
+
+	local players = quorumPlayers()
+	if #players <= 1 then
+		-- solo: auto-resolve countdown
+		task.spawn(function()
+			for remaining = Config.Banish.SoloConfirmSeconds, 1, -1 do
+				if not pending or pending.generation ~= myGen then
+					return
+				end
+				broadcastPrompt(dollId, dollName, { countdown = remaining })
+				task.wait(1)
+			end
+			if pending and pending.generation == myGen then
+				resolve()
+			end
+		end)
+	else
+		-- multiplayer: majority + timer fallback so an AFK player can't deadlock (plan review fix)
+		task.spawn(function()
+			local elapsed = 0
+			while pending and pending.generation == myGen do
+				task.wait(1)
+				elapsed += 1
+				local p = pending
+				if not p or p.generation ~= myGen then
+					return
+				end
+				local current = quorumPlayers()
+				local yes = 0
+				for _, plr in current do
+					if p.confirms[plr] then
+						yes += 1
+					end
+				end
+				if yes > #current / 2 then
+					local remaining = Config.Banish.MajorityTimerSeconds - elapsed
+					broadcastPrompt(dollId, dollName, { countdown = math.max(remaining, 0) })
+					if remaining <= 0 then
+						resolve()
+						return
+					end
+				end
+				if elapsed > Config.Shift.Watchdog.BanishStaging + Config.Banish.MajorityTimerSeconds then
+					cancel() -- watchdog: nobody decided (R2)
+					return
+				end
+			end
+		end)
+	end
+end
+
+function BanishService.reset()
+	pending = nil
+	generation += 1
+	BanishService.setUnlocked(false)
+end
+
+return BanishService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="26">
+          <Properties>
+            <string name="Name">DataService</string>
+            <string name="Source"><![CDATA[--!strict
+-- Persistence per R5: probe once, memory fallback, UpdateAsync merge-only, never blocks gameplay.
+
+local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+
+local DataService = {}
+
+type Stats = { bestShift: number, dollsCleared: number, perfectShifts: number, runs: number, loaded: boolean }
+
+local available = false
+local store: any = nil
+local cache: { [Player]: Stats } = {}
+local sessionDelta: { [Player]: { dollsCleared: number, perfectShifts: number, runs: number, bestShift: number } } = {}
+local loadedCallbacks: { (Player, Stats) -> () } = {}
+
+local function defaultStats(): Stats
+	return { bestShift = 0, dollsCleared = 0, perfectShifts = 0, runs = 0, loaded = false }
+end
+
+local function keyFor(player: Player): string
+	return "u_" .. player.UserId
+end
+
+local function loadPlayer(player: Player)
+	cache[player] = defaultStats()
+	sessionDelta[player] = { dollsCleared = 0, perfectShifts = 0, runs = 0, bestShift = 0 }
+	if not available then
+		return
+	end
+	task.spawn(function()
+		for attempt = 1, Config.Data.ReadRetries do
+			local ok, result = pcall(function()
+				return store:GetAsync(keyFor(player))
+			end)
+			if ok then
+				local stats = cache[player]
+				if stats and typeof(result) == "table" then
+					stats.bestShift = tonumber(result.bestShift) or 0
+					stats.dollsCleared = tonumber(result.dollsCleared) or 0
+					stats.perfectShifts = tonumber(result.perfectShifts) or 0
+					stats.runs = tonumber(result.runs) or 0
+				end
+				if stats then
+					stats.loaded = true
+					for _, cb in loadedCallbacks do
+						Util.safeCall("statsLoaded", cb, player, stats)
+					end
+				end
+				return
+			end
+			task.wait(Config.Data.RetryBackoffSeconds * attempt)
+		end
+		Util.warn("DataService: load failed for " .. player.Name .. " (memory-only this session)")
+	end)
+end
+
+local function flushPlayer(player: Player)
+	if not available then
+		return
+	end
+	local delta = sessionDelta[player]
+	if not delta or (delta.runs == 0 and delta.bestShift == 0) then
+		return
+	end
+	local snapshot = table.clone(delta)
+	local ok = pcall(function()
+		store:UpdateAsync(keyFor(player), function(old: any)
+			old = if typeof(old) == "table" then old else {}
+			return {
+				bestShift = math.max(tonumber(old.bestShift) or 0, snapshot.bestShift),
+				dollsCleared = (tonumber(old.dollsCleared) or 0) + snapshot.dollsCleared,
+				perfectShifts = (tonumber(old.perfectShifts) or 0) + snapshot.perfectShifts,
+				runs = (tonumber(old.runs) or 0) + snapshot.runs,
+			}
+		end)
+	end)
+	if ok then
+		local d = sessionDelta[player]
+		if d then
+			d.dollsCleared = 0
+			d.perfectShifts = 0
+			d.runs = 0
+			-- bestShift delta stays (max-merge is idempotent)
+		end
+	else
+		Util.warn("DataService: flush failed for " .. player.Name)
+	end
+end
+
+function DataService.init(_ctx: any)
+	-- availability probe, deferred (R5: never blocks init)
+	if Config.Features.DataStore then
+		task.spawn(function()
+			local ok = pcall(function()
+				store = DataStoreService:GetDataStore(Config.Data.StoreName)
+				store:GetAsync("__probe")
+			end)
+			available = ok
+			Util.log("DataService: " .. (if available then "DataStores ONLINE" else "DataStores unavailable — memory-only (publish + enable Studio API access to persist)"))
+			if available then
+				for _, player in Players:GetPlayers() do
+					if cache[player] and not cache[player].loaded then
+						loadPlayer(player)
+					end
+				end
+			end
+		end)
+	end
+
+	Players.PlayerAdded:Connect(loadPlayer)
+	for _, player in Players:GetPlayers() do
+		if not cache[player] then
+			loadPlayer(player)
+		end
+	end
+	Players.PlayerRemoving:Connect(function(player)
+		flushPlayer(player)
+		cache[player] = nil
+		sessionDelta[player] = nil
+	end)
+
+	game:BindToClose(function()
+		for _, player in Players:GetPlayers() do
+			Util.safeCall("bindToCloseFlush", flushPlayer, player)
+		end
+	end)
+
+	task.spawn(function()
+		while true do
+			task.wait(120)
+			for _, player in Players:GetPlayers() do
+				Util.safeCall("autosave", flushPlayer, player)
+			end
+		end
+	end)
+end
+
+function DataService.getStats(player: Player): Stats
+	return cache[player] or defaultStats()
+end
+
+function DataService.recordRun(player: Player, result: { shiftReached: number, dollsCleared: number, perfect: number })
+	local stats = cache[player]
+	local delta = sessionDelta[player]
+	if not stats or not delta then
+		return
+	end
+	stats.bestShift = math.max(stats.bestShift, result.shiftReached)
+	stats.dollsCleared += result.dollsCleared
+	stats.perfectShifts += result.perfect
+	stats.runs += 1
+	delta.bestShift = math.max(delta.bestShift, result.shiftReached)
+	delta.dollsCleared += result.dollsCleared
+	delta.perfectShifts += result.perfect
+	delta.runs += 1
+	for _, cb in loadedCallbacks do
+		Util.safeCall("statsChanged", cb, player, stats)
+	end
+end
+
+function DataService.onStatsChanged(fn: (Player, Stats) -> ())
+	table.insert(loadedCallbacks, fn)
+end
+
+return DataService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="27">
+          <Properties>
+            <string name="Name">DebugService</string>
+            <string name="Source"><![CDATA[--!strict
+-- Debug commands + overlay feed (R7). Active only when Config.DebugMode.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+
+local DebugService = {}
+
+local ctx: any
+
+local function allowed(player: Player): boolean
+	if not Config.DebugMode then
+		return false
+	end
+	if #Config.DebugAllowlist == 0 then
+		return true
+	end
+	return table.find(Config.DebugAllowlist, player.Name) ~= nil
+end
+
+local function toast(player: Player, msg: string)
+	Remotes.get(Remotes.Names.Toast):FireClient(player, msg, 5)
+end
+
+local function handleCommand(player: Player, message: string)
+	if not allowed(player) or message:sub(1, 1) ~= "/" then
+		return
+	end
+	local args = message:split(" ")
+	local cmd = args[1]:lower()
+	local S = ctx.services
+
+	if cmd == "/skipstate" then
+		S.ShiftManager.debugForceState()
+		toast(player, "state forced")
+	elseif cmd == "/shift" then
+		local n = tonumber(args[2])
+		if n then
+			S.ShiftManager.debugSetShift(n)
+			toast(player, "shift set to " .. n)
+		end
+	elseif cmd == "/reveal" then
+		local markedName, code = S.ShiftManager.debugReveal()
+		toast(player, ("marked: %s | spirit: %s (%s)"):format(
+			tostring(markedName),
+			code and code.name or "?",
+			code and code.code or "?"
+		))
+	elseif cmd == "/completedoll" then
+		local CareSteps = require(Shared:WaitForChild("Defs"):WaitForChild("CareSteps")) :: any
+		for _, dollId in S.DollService.getDollIds() do
+			for _, step in CareSteps.list do
+				S.DollService.completeStep(player, dollId, step.id)
+			end
+		end
+		toast(player, "all care steps completed")
+	elseif cmd == "/strike" then
+		local delta = tonumber(args[2]) or 1
+		S.ShiftManager.debugStrike(delta)
+		toast(player, "strike " .. delta)
+	elseif cmd == "/presence" then
+		local n = tonumber(args[2])
+		if n then
+			S.PresenceService.setValue(n)
+			toast(player, "presence = " .. n)
+		end
+	elseif cmd == "/haunt" then
+		local id = args[2]
+		if id then
+			S.HauntService.force(id, ctx.rng)
+			toast(player, "haunt " .. id)
+		end
+	elseif cmd == "/ribbon" then
+		-- direct-grant path for testing
+		local manifest = ctx.manifest
+		if manifest.ribbonPrompt then
+			toast(player, "walk to the spool; or use prompt — granting via spool trigger not simulated")
+		end
+	elseif cmd == "/endrun" then
+		S.ShiftManager.debugEndRun()
+		toast(player, "run ended")
+	elseif cmd == "/resetrun" then
+		S.ShiftManager.debugEndRun()
+		toast(player, "run reset")
+	end
+end
+
+function DebugService.init(context: any)
+	ctx = context
+	if not Config.DebugMode then
+		return
+	end
+	Util.log("DebugService ACTIVE — /skipstate /shift N /reveal /completedoll /strike N /presence N /haunt <id> /endrun")
+
+	local function hook(player: Player)
+		player.Chatted:Connect(function(message)
+			Util.safeCall("debugCommand", handleCommand, player, message)
+		end)
+	end
+	Players.PlayerAdded:Connect(hook)
+	for _, player in Players:GetPlayers() do
+		hook(player)
+	end
+
+	-- overlay feed at 2 Hz
+	task.spawn(function()
+		while true do
+			task.wait(0.5)
+			local S = ctx.services
+			local payload = {
+				presence = math.floor(S.PresenceService.getValue() * 10) / 10,
+				tier = S.PresenceService.getTier(),
+				state = S.ShiftManager.getState(),
+				shift = S.ShiftManager.getShiftNumber(),
+				watched = S.WatchService.watchedMap(),
+				marked = S.DollService.getMarkedId(),
+			}
+			for _, player in Players:GetPlayers() do
+				if allowed(player) then
+					Remotes.get(Remotes.Names.DebugInfo):FireClient(player, payload)
+				end
+			end
+		end
+	end)
+end
+
+return DebugService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="28">
+          <Properties>
+            <string name="Name">DollService</string>
+            <string name="Source"><![CDATA[--!strict
+-- Dolls: rigs, care chain + minigame locks, ribbon, naming, carry (R6), procedural tells, consume.
+-- Marked state lives ONLY in server tables (never attributes — replication leaks to exploiters).
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextService = game:GetService("TextService")
+local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local CareSteps = require(Shared:WaitForChild("Defs"):WaitForChild("CareSteps")) :: any
+local DollNames = require(Shared:WaitForChild("Defs"):WaitForChild("DollNames")) :: any
+
+local DollService = {}
+
+local PALETTES = {
+	{ body = Color3.fromRGB(214, 178, 148), dress = Color3.fromRGB(120, 60, 70), hair = Color3.fromRGB(60, 40, 30) },
+	{ body = Color3.fromRGB(228, 200, 178), dress = Color3.fromRGB(60, 80, 120), hair = Color3.fromRGB(220, 190, 120) },
+	{ body = Color3.fromRGB(200, 170, 150), dress = Color3.fromRGB(80, 110, 70), hair = Color3.fromRGB(40, 30, 28) },
+	{ body = Color3.fromRGB(222, 190, 165), dress = Color3.fromRGB(130, 100, 150), hair = Color3.fromRGB(150, 60, 40) },
+	{ body = Color3.fromRGB(206, 182, 160), dress = Color3.fromRGB(140, 120, 60), hair = Color3.fromRGB(90, 70, 50) },
+	{ body = Color3.fromRGB(232, 210, 190), dress = Color3.fromRGB(90, 60, 60), hair = Color3.fromRGB(230, 225, 215) },
+}
+
+type DollRecord = {
+	id: string,
+	model: Model,
+	slot: BasePart,
+	name: string,
+	variant: number,
+	careDone: { [string]: boolean },
+	ribbonTied: boolean,
+	marked: boolean,
+	consumed: boolean,
+	prompt: ProximityPrompt,
+	pupils: { Frame },
+	resting: CFrame,
+	slumped: boolean,
+	namedByPicker: boolean,
+}
+
+local ctx: any
+local dolls: { [string]: DollRecord } = {}
+local dollOrder: { string } = {}
+local locks: { [string]: { player: Player, stepId: string, expiry: number } } = {}
+local ribbonHolders: { [Player]: boolean } = {}
+local carriers: { [Player]: { dollId: string, clone: Model } } = {}
+local stepCallbacks: { (Player, string, string) -> () } = {}
+local generation = 0
+local unlocked = false
+
+local function fire(name: string, ...: any)
+	Remotes.get(Remotes.Names[name]):FireAllClients(...)
+end
+
+local function fireTo(player: Player, name: string, ...: any)
+	Remotes.get(Remotes.Names[name]):FireClient(player, ...)
+end
+
+-- ---------- rig ----------
+
+local function buildRig(id: string, variant: number, slot: BasePart): (Model, { Frame })
+	local pal = PALETTES[((variant - 1) % #PALETTES) + 1]
+	local model = Instance.new("Model")
+	model.Name = "Doll"
+	model:SetAttribute("DollId", id)
+	model:SetAttribute("Variant", variant)
+	CollectionService:AddTag(model, "Doll")
+
+	local function dp(name: string, size: Vector3, cf: CFrame, color: Color3): Part
+		local p = Instance.new("Part")
+		p.Name = name
+		p.Anchored = true
+		p.CanCollide = false
+		p.Material = Enum.Material.SmoothPlastic
+		p.Size = size
+		p.CFrame = cf
+		p.Color = color
+		p.TopSurface = Enum.SurfaceType.Smooth
+		p.BottomSurface = Enum.SurfaceType.Smooth
+		p.Parent = model
+		return p
+	end
+
+	local base = slot.CFrame
+	local root = dp("Root", Vector3.new(0.5, 0.5, 0.5), base, pal.body)
+	root.Transparency = 1
+	root.CanQuery = false
+	model.PrimaryPart = root
+
+	local _body = dp("Body", Vector3.new(1.6, 2.2, 1), base * CFrame.new(0, 1.1, 0), pal.dress)
+	local head = dp("Head", Vector3.new(1.3, 1.3, 1.2), base * CFrame.new(0, 2.9, 0), pal.body)
+	dp("Hair", Vector3.new(1.45, 0.6, 1.3), base * CFrame.new(0, 3.55, 0), pal.hair)
+	dp("ArmL", Vector3.new(0.45, 1.6, 0.45), base * CFrame.new(-1.1, 1.4, 0) * CFrame.Angles(0, 0, math.rad(12)), pal.body)
+	dp("ArmR", Vector3.new(0.45, 1.6, 0.45), base * CFrame.new(1.1, 1.4, 0) * CFrame.Angles(0, 0, math.rad(-12)), pal.body)
+	local musicBox = dp("MusicBox", Vector3.new(1.1, 0.7, 0.9), base * CFrame.new(0, 0.4, -1), Color3.fromRGB(80, 55, 40))
+	dp("Crank", Vector3.new(0.15, 0.5, 0.15), musicBox.CFrame * CFrame.new(0.7, 0.1, 0), Color3.fromRGB(180, 160, 90))
+
+	-- face: SurfaceGui with movable pupils
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 100
+	gui.Parent = head
+	local pupils: { Frame } = {}
+	for i, x in { 0.28, 0.62 } do
+		local eye = Instance.new("Frame")
+		eye.Name = "Eye" .. i
+		eye.AnchorPoint = Vector2.new(0.5, 0.5)
+		eye.Position = UDim2.fromScale(x, 0.42)
+		eye.Size = UDim2.fromScale(0.2, 0.24)
+		eye.BackgroundColor3 = Color3.fromRGB(240, 238, 232)
+		eye.BorderSizePixel = 0
+		eye.Parent = gui
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(1, 0)
+		corner.Parent = eye
+		local pupil = Instance.new("Frame")
+		pupil.Name = "Pupil"
+		pupil.AnchorPoint = Vector2.new(0.5, 0.5)
+		pupil.Position = UDim2.fromScale(0.5, 0.5)
+		pupil.Size = UDim2.fromScale(0.45, 0.45)
+		pupil.BackgroundColor3 = Color3.fromRGB(20, 16, 22)
+		pupil.BorderSizePixel = 0
+		pupil.Parent = eye
+		local pc = Instance.new("UICorner")
+		pc.CornerRadius = UDim.new(1, 0)
+		pc.Parent = pupil
+		table.insert(pupils, pupil)
+	end
+	-- stitched mouth
+	local mouth = Instance.new("Frame")
+	mouth.AnchorPoint = Vector2.new(0.5, 0.5)
+	mouth.Position = UDim2.fromScale(0.45, 0.74)
+	mouth.Size = UDim2.fromScale(0.34, 0.045)
+	mouth.BackgroundColor3 = Color3.fromRGB(120, 70, 70)
+	mouth.BorderSizePixel = 0
+	mouth.Parent = gui
+
+	-- name tag
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "NameTag"
+	billboard.Adornee = head
+	billboard.Size = UDim2.new(0, 120, 0, 28)
+	billboard.StudsOffset = Vector3.new(0, 1.6, 0)
+	billboard.MaxDistance = 40
+	billboard.AlwaysOnTop = false
+	billboard.Parent = head
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Name = "NameLabel"
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Size = UDim2.fromScale(1, 1)
+	nameLabel.Font = Enum.Font.Garamond
+	nameLabel.TextScaled = true
+	nameLabel.TextColor3 = Color3.fromRGB(226, 216, 196)
+	nameLabel.TextStrokeTransparency = 0.6
+	nameLabel.Parent = billboard
+
+	return model, pupils
+end
+
+-- ---------- prompt state ----------
+
+local function refreshPrompt(rec: DollRecord)
+	if rec.consumed then
+		rec.prompt.Enabled = false
+		return
+	end
+	if locks[rec.id] then
+		rec.prompt.Enabled = false
+		return
+	end
+	local nextStep = DollService.nextStepFor(rec.id)
+	if nextStep then
+		rec.prompt.ActionText = CareSteps.byId[nextStep].name
+		rec.prompt.ObjectText = rec.name
+		rec.prompt.Enabled = true
+	else
+		rec.prompt.ObjectText = rec.name
+		-- 5 steps done: ribbon (if holder) takes precedence, else pickup when unlocked
+		rec.prompt.Enabled = true
+		rec.prompt.ActionText = "…" -- resolved per-player at trigger; show generic
+		if unlocked then
+			rec.prompt.ActionText = "Pick Up / Tie Ribbon"
+		elseif not rec.ribbonTied then
+			rec.prompt.ActionText = "Tie Ribbon (if you have one)"
+		else
+			rec.prompt.Enabled = false
+		end
+		-- keep it enabled if ribbon still possible even when tied dolls wait for unlock
+		if not unlocked and rec.ribbonTied then
+			rec.prompt.Enabled = false
+		end
+	end
+end
+
+local function refreshAllPrompts()
+	for _, rec in dolls do
+		refreshPrompt(rec)
+	end
+end
+
+-- ---------- naming ----------
+
+local function applyName(rec: DollRecord, name: string)
+	rec.name = name
+	rec.model:SetAttribute("DisplayName", name)
+	local head = rec.model:FindFirstChild("Head")
+	if head then
+		local tag = head:FindFirstChild("NameTag")
+		local label = tag and tag:FindFirstChild("NameLabel")
+		if label and label:IsA("TextLabel") then
+			label.Text = name
+		end
+	end
+	fire("DollUpdate", rec.id, { name = name })
+	refreshPrompt(rec)
+end
+
+-- ---------- public API ----------
+
+function DollService.init(context: any)
+	ctx = context
+
+	Remotes.get(Remotes.Names.MinigameDone).OnServerEvent:Connect(function(player: Player, dollId: any, stepId: any, success: any)
+		if typeof(dollId) ~= "string" or typeof(stepId) ~= "string" then
+			return
+		end
+		local lock = locks[dollId]
+		if not lock or lock.player ~= player or lock.stepId ~= stepId then
+			return
+		end
+		locks[dollId] = nil
+		if success == true then
+			DollService.completeStep(player, dollId, stepId)
+		else
+			fireTo(player, "MinigameCancel", dollId, stepId)
+		end
+		local rec = dolls[dollId]
+		if rec then
+			refreshPrompt(rec)
+		end
+	end)
+
+	Remotes.get(Remotes.Names.ChooseName).OnServerEvent:Connect(function(player: Player, dollId: any, choiceIndex: any, freeText: any)
+		if not Config.Features.Naming or typeof(dollId) ~= "string" then
+			return
+		end
+		local rec = dolls[dollId]
+		if not rec or rec.consumed or rec.namedByPicker then
+			return
+		end
+		if typeof(choiceIndex) == "number" and DollNames[choiceIndex] then
+			rec.namedByPicker = true
+			applyName(rec, DollNames[choiceIndex])
+		elseif Config.Features.FreeTextNames and typeof(freeText) == "string" then
+			local trimmed = freeText:gsub("^%s+", ""):gsub("%s+$", ""):sub(1, 20)
+			if #trimmed < 2 then
+				return
+			end
+			task.spawn(function()
+				local okFilter, result = pcall(function()
+					return TextService:FilterStringAsync(trimmed, player.UserId)
+				end)
+				if not okFilter then
+					return
+				end
+				local okGet, filtered = pcall(function()
+					return result:GetNonChatStringForBroadcastAsync()
+				end)
+				if okGet and typeof(filtered) == "string" and #filtered >= 2 and not filtered:find("^#+$") then
+					rec.namedByPicker = true
+					applyName(rec, filtered)
+				end
+			end)
+		end
+	end)
+
+	Remotes.get(Remotes.Names.DropDoll).OnServerEvent:Connect(function(player: Player)
+		DollService.drop(player)
+	end)
+
+	-- leave/reset glue for carriers + ribbon holders + locks
+	Players.PlayerRemoving:Connect(function(player)
+		DollService.drop(player)
+		ribbonHolders[player] = nil
+		for dollId, lock in locks do
+			if lock.player == player then
+				locks[dollId] = nil
+				local rec = dolls[dollId]
+				if rec then
+					refreshPrompt(rec)
+				end
+			end
+		end
+	end)
+	Players.PlayerAdded:Connect(function(player)
+		player.CharacterAdded:Connect(function(char: Model)
+			local humanoid = char:WaitForChild("Humanoid", 10)
+			if humanoid and humanoid:IsA("Humanoid") then
+				humanoid.Died:Connect(function()
+					DollService.drop(player)
+					ribbonHolders[player] = nil
+				end)
+			end
+		end)
+	end)
+
+	-- lock expiry sweeper (R2)
+	task.spawn(function()
+		while true do
+			task.wait(1)
+			local now = os.clock()
+			for dollId, lock in locks do
+				if now > lock.expiry then
+					locks[dollId] = nil
+					Util.safeCall("minigameExpire", function()
+						fireTo(lock.player, "MinigameCancel", dollId, lock.stepId)
+					end)
+					local rec = dolls[dollId]
+					if rec then
+						refreshPrompt(rec)
+					end
+				end
+			end
+		end
+	end)
+end
+
+-- Wire ribbon spool + doll prompts against the manifest (called once from bootstrap after build)
+function DollService.wireWorld(manifest: any)
+	if manifest.ribbonPrompt then
+		manifest.ribbonPrompt.Triggered:Connect(function(player: Player)
+			ribbonHolders[player] = true
+			fireTo(player, "Toast", "You take a length of silver ribbon.", 3)
+		end)
+	end
+end
+
+function DollService.spawnShift(shiftParams: any, names: { string }, markedIndex: number, rng: any): { any }
+	generation += 1
+	DollService.clearShift()
+	unlocked = false
+	local manifest = ctx.manifest
+	local infos = {}
+	for i = 1, shiftParams.dollCount do
+		local slot = manifest.benchSlots[i]
+		if not slot then
+			break
+		end
+		local id = ("doll_%d_%d"):format(generation, i)
+		local variant = rng:NextInteger(1, #PALETTES)
+		local model, pupils = buildRig(id, variant, slot)
+		model.Parent = manifest.root
+		local p = Instance.new("ProximityPrompt")
+		p.RequiresLineOfSight = false
+		p.MaxActivationDistance = Config.Care.PromptDistance
+		p.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+		local body = model:FindFirstChild("Body")
+		p.Parent = body or model
+		local rec: DollRecord = {
+			id = id,
+			model = model,
+			slot = slot,
+			name = names[i] or ("Doll #" .. i),
+			variant = variant,
+			careDone = {},
+			ribbonTied = false,
+			marked = (i == markedIndex),
+			consumed = false,
+			prompt = p,
+			pupils = pupils,
+			resting = slot.CFrame,
+			slumped = false,
+			namedByPicker = false,
+		}
+		dolls[id] = rec
+		table.insert(dollOrder, id)
+		applyName(rec, rec.name)
+		p.Triggered:Connect(function(player: Player)
+			DollService.onPromptTriggered(player, id)
+		end)
+		refreshPrompt(rec)
+		table.insert(infos, { id = id, name = rec.name, variant = variant })
+	end
+	return infos
+end
+
+function DollService.onPromptTriggered(player: Player, dollId: string)
+	local rec = dolls[dollId]
+	if not rec or rec.consumed or locks[dollId] then
+		return
+	end
+	local nextStep = DollService.nextStepFor(dollId)
+	if nextStep then
+		locks[dollId] = { player = player, stepId = nextStep, expiry = os.clock() + Config.Care.MinigameSeconds }
+		refreshPrompt(rec)
+		fireTo(player, "MinigameStart", dollId, nextStep, math.random(1, 2 ^ 30))
+		return
+	end
+	-- 5 steps done: ribbon first if held, else pickup when unlocked
+	if ribbonHolders[player] and not rec.ribbonTied then
+		DollService.tieRibbon(player, dollId)
+		return
+	end
+	if unlocked then
+		DollService.pickup(player, dollId)
+	end
+end
+
+function DollService.nextStepFor(dollId: string): string?
+	local rec = dolls[dollId]
+	if not rec then
+		return nil
+	end
+	for _, step in CareSteps.list do
+		if not rec.careDone[step.id] then
+			return step.id
+		end
+	end
+	return nil
+end
+
+function DollService.completeStep(player: Player, dollId: string, stepId: string)
+	local rec = dolls[dollId]
+	if not rec or rec.consumed then
+		return
+	end
+	if DollService.nextStepFor(dollId) ~= stepId then
+		return
+	end
+	rec.careDone[stepId] = true
+	local doneList = {}
+	for id in rec.careDone do
+		table.insert(doneList, id)
+	end
+	local allDone = DollService.nextStepFor(dollId) == nil
+	fire("DollUpdate", dollId, { careDone = doneList, done = allDone })
+	refreshPrompt(rec)
+	for _, cb in stepCallbacks do
+		Util.safeCall("stepCallback", cb, player, dollId, stepId)
+	end
+end
+
+function DollService.allListedCareDone(): boolean
+	for _, rec in dolls do
+		if not rec.consumed and DollService.nextStepFor(rec.id) ~= nil then
+			return false
+		end
+	end
+	return next(dolls) ~= nil
+end
+
+function DollService.tieRibbon(player: Player, dollId: string): boolean
+	local rec = dolls[dollId]
+	if not rec or rec.consumed or rec.ribbonTied then
+		return false
+	end
+	if not ribbonHolders[player] then
+		return false
+	end
+	if DollService.nextStepFor(dollId) ~= nil then
+		return false
+	end
+	ribbonHolders[player] = nil
+	rec.ribbonTied = true
+	-- small visible ribbon on the doll
+	local body = rec.model:FindFirstChild("Body")
+	if body and body:IsA("BasePart") then
+		local ribbon = Instance.new("Part")
+		ribbon.Name = "Ribbon"
+		ribbon.Anchored = true
+		ribbon.CanCollide = false
+		ribbon.Material = Enum.Material.Neon
+		ribbon.Color = Color3.fromRGB(210, 215, 225)
+		ribbon.Size = Vector3.new(1.7, 0.25, 1.05)
+		ribbon.CFrame = body.CFrame * CFrame.new(0, 0.4, 0)
+		ribbon.Parent = rec.model
+	end
+	fireTo(player, "DollUpdate", dollId, { ribbon = true })
+	fireTo(player, "Toast", ("You tie the silver ribbon around %s."):format(rec.name), 3)
+	refreshPrompt(rec)
+	return true
+end
+
+function DollService.hasRibbon(dollId: string): boolean
+	local rec = dolls[dollId]
+	return rec ~= nil and rec.ribbonTied
+end
+
+function DollService.setUnlocked(state: boolean)
+	unlocked = state
+	refreshAllPrompts()
+end
+
+function DollService.pickup(player: Player, dollId: string): boolean
+	local rec = dolls[dollId]
+	if not rec or rec.consumed or carriers[player] then
+		return false
+	end
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp or not hrp:IsA("BasePart") then
+		return false
+	end
+	-- hide original
+	for _, d in rec.model:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Transparency = 1
+		elseif d:IsA("SurfaceGui") or d:IsA("BillboardGui") then
+			(d :: any).Enabled = false
+		end
+	end
+	rec.prompt.Enabled = false
+	-- visual clone, zero physics (R6)
+	local clone = rec.model:Clone()
+	clone.Name = "CarriedDoll"
+	for _, d in clone:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Transparency = if d.Name == "Root" then 1 else 0
+			d.Anchored = false
+			d.Massless = true
+			d.CanCollide = false
+			d.CanQuery = false
+			d.CanTouch = false
+		elseif d:IsA("ProximityPrompt") then
+			d:Destroy()
+		elseif d:IsA("SurfaceGui") then
+			d.Enabled = true
+		elseif d:IsA("BillboardGui") then
+			d.Enabled = false
+		end
+	end
+	local cloneRoot = clone.PrimaryPart
+	if not cloneRoot then
+		clone:Destroy()
+		return false
+	end
+	-- weld every part to the clone root, then root to carrier
+	for _, d in clone:GetDescendants() do
+		if d:IsA("BasePart") and d ~= cloneRoot then
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = cloneRoot
+			weld.Part1 = d
+			weld.Parent = d
+		end
+	end
+	clone:PivotTo(hrp.CFrame * CFrame.new(0, 0, -2.2))
+	local carryWeld = Instance.new("WeldConstraint")
+	carryWeld.Part0 = hrp
+	carryWeld.Part1 = cloneRoot
+	carryWeld.Parent = cloneRoot
+	clone.Parent = char
+	carriers[player] = { dollId = dollId, clone = clone }
+	fireTo(player, "Toast", ("You pick up %s. Carry them to the Banish Box… if you're sure."):format(rec.name), 4)
+	return true
+end
+
+function DollService.drop(player: Player)
+	local carry = carriers[player]
+	if not carry then
+		return
+	end
+	carriers[player] = nil
+	Util.safeCall("destroyCarryClone", function()
+		carry.clone:Destroy()
+	end)
+	local rec = dolls[carry.dollId]
+	if rec and not rec.consumed then
+		for _, d in rec.model:GetDescendants() do
+			if d:IsA("BasePart") then
+				d.Transparency = if d.Name == "Root" then 1 else 0
+			elseif d:IsA("SurfaceGui") or d:IsA("BillboardGui") then
+				(d :: any).Enabled = true
+			end
+		end
+		refreshPrompt(rec)
+	end
+end
+
+function DollService.getCarried(player: Player): string?
+	local carry = carriers[player]
+	return carry and carry.dollId or nil
+end
+
+function DollService.isMarked(dollId: string): boolean
+	local rec = dolls[dollId]
+	return rec ~= nil and rec.marked
+end
+
+function DollService.getMarkedId(): string?
+	for id, rec in dolls do
+		if rec.marked and not rec.consumed then
+			return id
+		end
+	end
+	return nil
+end
+
+function DollService.getDisplayName(dollId: string): string
+	local rec = dolls[dollId]
+	return rec and rec.name or "???"
+end
+
+function DollService.getDollIds(): { string }
+	local out = {}
+	for _, id in dollOrder do
+		if dolls[id] and not dolls[id].consumed then
+			table.insert(out, id)
+		end
+	end
+	return out
+end
+
+function DollService.getModel(dollId: string): Model?
+	local rec = dolls[dollId]
+	return rec and rec.model or nil
+end
+
+function DollService.hasActiveLock(): boolean
+	return next(locks) ~= nil
+end
+
+function DollService.consume(dollId: string)
+	local rec = dolls[dollId]
+	if not rec or rec.consumed then
+		return
+	end
+	rec.consumed = true
+	rec.prompt.Enabled = false
+	-- sink + fade
+	local parts = {}
+	for _, d in rec.model:GetDescendants() do
+		if d:IsA("BasePart") then
+			table.insert(parts, d)
+		end
+	end
+	for _, p in parts do
+		TweenService:Create(p, TweenInfo.new(1.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+			Transparency = 1,
+			CFrame = p.CFrame * CFrame.new(0, -2, 0),
+		}):Play()
+	end
+	task.delay(2, function()
+		Util.safeCall("consumeDestroy", function()
+			rec.model:Destroy()
+		end)
+	end)
+end
+
+function DollService.onStepCompleted(fn: (Player, string, string) -> ())
+	table.insert(stepCallbacks, fn)
+end
+
+-- ---------- tells (procedural motion) ----------
+
+local function tweenPart(inst: Instance?, time: number, props: { [string]: any })
+	if inst and inst:IsA("BasePart") then
+		TweenService:Create(inst, TweenInfo.new(time, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), props):Play()
+	end
+end
+
+function DollService.performTell(dollId: string, tellId: string): boolean
+	local rec = dolls[dollId]
+	if not rec or rec.consumed then
+		return false
+	end
+	local model = rec.model
+	local head = model:FindFirstChild("Head")
+
+	if tellId == "HeadTurn" then
+		if not (head and head:IsA("BasePart")) then
+			return false
+		end
+		local original = head.CFrame
+		tweenPart(head, 1.2, { CFrame = original * CFrame.Angles(0, math.rad(22), 0) })
+		task.delay(2.4, function()
+			tweenPart(model:FindFirstChild("Head"), 1.2, { CFrame = original })
+		end)
+		return true
+	elseif tellId == "EyesFollow" then
+		local target: BasePart? = nil
+		local best = math.huge
+		for _, player in Players:GetPlayers() do
+			local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+			if hrp and hrp:IsA("BasePart") and head and head:IsA("BasePart") then
+				local d = (hrp.Position - head.Position).Magnitude
+				if d < best then
+					best = d
+					target = hrp
+				end
+			end
+		end
+		if not target or not (head and head:IsA("BasePart")) then
+			return false
+		end
+		task.spawn(function()
+			local t0 = os.clock()
+			while os.clock() - t0 < 4 do
+				local h = model:FindFirstChild("Head")
+				if not (h and h:IsA("BasePart")) or rec.consumed then
+					break
+				end
+				local dir = h.CFrame:PointToObjectSpace(target.Position)
+				local px = math.clamp(0.5 + dir.X * 0.06, 0.2, 0.8)
+				local py = math.clamp(0.5 - dir.Y * 0.05, 0.25, 0.75)
+				for _, pupil in rec.pupils do
+					pupil.Position = UDim2.fromScale(px, py)
+				end
+				task.wait(0.1)
+			end
+			for _, pupil in rec.pupils do
+				pupil.Position = UDim2.fromScale(0.5, 0.5)
+			end
+		end)
+		return true
+	elseif tellId == "Scoot" then
+		local offset = CFrame.new((math.random() - 0.5) * 3, 0, (math.random() - 0.5) * 1.2)
+		rec.resting = rec.resting * offset
+		model:PivotTo(rec.resting)
+		return true
+	elseif tellId == "MusicBoxTurn" then
+		local crank = model:FindFirstChild("Crank")
+		if not (crank and crank:IsA("BasePart")) then
+			return false
+		end
+		task.spawn(function()
+			for _ = 1, 10 do
+				local c = model:FindFirstChild("Crank")
+				if not (c and c:IsA("BasePart")) or rec.consumed then
+					break
+				end
+				c.CFrame = c.CFrame * CFrame.Angles(math.rad(36), 0, 0)
+				task.wait(0.5)
+			end
+		end)
+		return true
+	elseif tellId == "Slump" then
+		local body = model:FindFirstChild("Body")
+		if not (body and body:IsA("BasePart")) then
+			return false
+		end
+		local angle = if rec.slumped then 0 else math.rad(12)
+		rec.slumped = not rec.slumped
+		tweenPart(body, 1.5, { CFrame = rec.resting * CFrame.new(0, 1.1, 0) * CFrame.Angles(0, 0, angle) })
+		return true
+	elseif tellId == "StitchMark" then
+		local arm = model:FindFirstChild("ArmL")
+		if not (arm and arm:IsA("BasePart")) then
+			return false
+		end
+		if arm:FindFirstChild("StitchGui") then
+			return false
+		end
+		local gui = Instance.new("SurfaceGui")
+		gui.Name = "StitchGui"
+		gui.Face = Enum.NormalId.Front
+		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+		gui.PixelsPerStud = 100
+		gui.Parent = arm
+		for i = 1, 4 do
+			local seg = Instance.new("Frame")
+			seg.AnchorPoint = Vector2.new(0.5, 0.5)
+			seg.Position = UDim2.fromScale(0.5 + (if i % 2 == 0 then 0.12 else -0.12), 0.2 + i * 0.15)
+			seg.Size = UDim2.fromScale(0.4, 0.06)
+			seg.Rotation = if i % 2 == 0 then 25 else -25
+			seg.BackgroundColor3 = Color3.fromRGB(70, 30, 40)
+			seg.BorderSizePixel = 0
+			seg.Parent = gui
+		end
+		return true
+	end
+	return false
+end
+
+function DollService.clearShift()
+	for _, rec in dolls do
+		Util.safeCall("clearDoll", function()
+			rec.model:Destroy()
+		end)
+	end
+	dolls = {}
+	dollOrder = {}
+	locks = {}
+	for player in carriers do
+		DollService.drop(player)
+	end
+	carriers = {}
+	ribbonHolders = {}
+	unlocked = false
+end
+
+return DollService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="29">
+          <Properties>
+            <string name="Name">GlyphService</string>
+            <string name="Source"><![CDATA[--!strict
+-- Glyph tokens, the Spirit Compass tool, and the SHARED found-set + ledger slots.
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local Glyphs = require(Shared:WaitForChild("Defs"):WaitForChild("Glyphs")) :: any
+local Draw = require(Shared:WaitForChild("Logic"):WaitForChild("Draw")) :: any
+
+local GlyphService = {}
+
+local ctx: any
+local tokens: { [string]: { part: BasePart, glyphId: string, targetValue: Vector3Value } } = {}
+local found: { string } = {}
+local slots: { [number]: string? } = {}
+local detectorTool: Tool? = nil
+local generation = 0
+
+local function broadcast(glyphId: string?, finder: string?)
+	local slotsCopy: { any } = {}
+	for i = 1, 3 do
+		slotsCopy[i] = slots[i] or false -- false travels; nil holes don't
+	end
+	Remotes.get(Remotes.Names.GlyphFound):FireAllClients(glyphId, {
+		found = table.clone(found),
+		slots = slotsCopy,
+		finder = finder,
+	})
+end
+
+local function buildDetector(): Tool
+	local tool = Instance.new("Tool")
+	tool.Name = "Spirit Compass"
+	tool.CanBeDropped = false
+	tool.RequiresHandle = true
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = Vector3.new(0.8, 0.5, 1.4)
+	handle.Color = Color3.fromRGB(120, 96, 60)
+	handle.Material = Enum.Material.Metal
+	handle.CanCollide = false
+	handle.Parent = tool
+	local needle = Instance.new("Part")
+	needle.Name = "Needle"
+	needle.Size = Vector3.new(0.1, 0.1, 0.9)
+	needle.Color = Color3.fromRGB(200, 205, 215)
+	needle.Material = Enum.Material.Neon
+	needle.Massless = true
+	needle.CanCollide = false
+	needle.CFrame = handle.CFrame * CFrame.new(0, 0.35, 0)
+	needle.Parent = tool
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = handle
+	weld.Part1 = needle
+	weld.Parent = needle
+	local light = Instance.new("PointLight")
+	light.Name = "GlowLight"
+	light.Color = Color3.fromRGB(180, 120, 255)
+	light.Brightness = 0
+	light.Range = 8
+	light.Parent = handle
+	local targets = Instance.new("Folder")
+	targets.Name = "GlyphTargets"
+	targets.Parent = tool
+	return tool
+end
+
+local function placeDetectorAtRack()
+	local tool = detectorTool
+	if not tool then
+		return
+	end
+	local rack = ctx.manifest.detectorRack
+	if not rack then
+		return
+	end
+	tool.Parent = workspace
+	local handle = tool:FindFirstChild("Handle")
+	if handle and handle:IsA("BasePart") then
+		handle.CFrame = rack.CFrame * CFrame.new(0, 3.6, 0)
+		handle.Anchored = true
+		-- prompt to take it (tools on the ground need touch; prompt is mobile-friendlier)
+		if not handle:FindFirstChildOfClass("ProximityPrompt") then
+			local p = Instance.new("ProximityPrompt")
+			p.ActionText = "Take Spirit Compass"
+			p.ObjectText = "Detector"
+			p.RequiresLineOfSight = false
+			p.MaxActivationDistance = Config.Care.PromptDistance
+			p.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+			p.Parent = handle
+			p.Triggered:Connect(function(player: Player)
+				local t = detectorTool
+				local h = t and t:FindFirstChild("Handle")
+				if t and h and h:IsA("BasePart") and t.Parent == workspace then
+					h.Anchored = false
+					p.Enabled = false
+					local backpack = player:FindFirstChildOfClass("Backpack")
+					if backpack then
+						t.Parent = backpack
+						local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+						if humanoid then
+							humanoid:EquipTool(t)
+						end
+					end
+				end
+			end)
+		else
+			local p = handle:FindFirstChildOfClass("ProximityPrompt")
+			if p then
+				p.Enabled = true
+			end
+		end
+	end
+end
+
+function GlyphService.init(context: any)
+	ctx = context
+	if Config.Features.Detector then
+		detectorTool = buildDetector()
+		placeDetectorAtRack()
+	end
+
+	Remotes.get(Remotes.Names.SlotGlyph).OnServerEvent:Connect(function(_player: Player, slotIndex: any, glyphId: any)
+		if typeof(slotIndex) ~= "number" or slotIndex < 1 or slotIndex > 3 or slotIndex % 1 ~= 0 then
+			return
+		end
+		if glyphId == nil then
+			slots[slotIndex] = nil
+			broadcast(nil, nil)
+			return
+		end
+		if typeof(glyphId) ~= "string" or not table.find(found, glyphId) then
+			return
+		end
+		slots[slotIndex] = glyphId
+		broadcast(nil, nil)
+	end)
+
+	-- re-rack the detector if its carrier leaves/dies
+	Players.PlayerRemoving:Connect(function(player: Player)
+		local tool = detectorTool
+		if tool and (tool:IsDescendantOf(player) or (player.Character and tool:IsDescendantOf(player.Character))) then
+			task.defer(placeDetectorAtRack)
+		end
+	end)
+end
+
+function GlyphService.startShift(spiritCode: { string }, rng: any)
+	generation += 1
+	GlyphService.stopShift()
+	local myGen = generation
+	local spawnParts = Draw.sample(rng, ctx.manifest.glyphSpawns, #spiritCode)
+	for i, glyphId in spiritCode do
+		local marker = spawnParts[i]
+		if not marker then
+			break
+		end
+		local tokenId = ("glyph_%d_%d"):format(myGen, i)
+		local token = Instance.new("Part")
+		token.Name = "GlyphToken"
+		token.Shape = Enum.PartType.Ball
+		token.Size = Vector3.new(0.9, 0.9, 0.9)
+		token.Color = Color3.fromRGB(40, 30, 55)
+		token.Material = Enum.Material.Neon
+		token.Anchored = true
+		token.CanCollide = false
+		token.CFrame = marker.CFrame
+		CollectionService:AddTag(token, "GlyphToken")
+		token:SetAttribute("GlyphId", glyphId)
+		local light = Instance.new("PointLight")
+		light.Color = Color3.fromRGB(160, 110, 240)
+		light.Brightness = 0.5
+		light.Range = 6
+		light.Parent = token
+		TweenService:Create(
+			token,
+			TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ CFrame = marker.CFrame * CFrame.new(0, 0.8, 0) }
+		):Play()
+		local p = Instance.new("ProximityPrompt")
+		p.ActionText = "Collect Glyph"
+		p.ObjectText = "Strange Mark"
+		p.RequiresLineOfSight = false
+		p.MaxActivationDistance = Config.Glyphs.CollectDistance
+		p.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+		p.Parent = token
+		token.Parent = ctx.manifest.root
+
+		local targetValue = Instance.new("Vector3Value")
+		targetValue.Name = tokenId
+		targetValue.Value = marker.CFrame.Position
+		local tool = detectorTool
+		if tool then
+			local folder = tool:FindFirstChild("GlyphTargets")
+			if folder then
+				targetValue.Parent = folder
+			end
+		end
+
+		tokens[tokenId] = { part = token, glyphId = glyphId, targetValue = targetValue }
+		p.Triggered:Connect(function(player: Player)
+			GlyphService.collect(player, tokenId)
+		end)
+	end
+end
+
+function GlyphService.collect(player: Player, tokenId: string)
+	local token = tokens[tokenId]
+	if not token then
+		return
+	end
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not (hrp and hrp:IsA("BasePart")) then
+		return
+	end
+	if (hrp.Position - token.part.Position).Magnitude > Config.Glyphs.CollectDistance + 4 then
+		return
+	end
+	tokens[tokenId] = nil
+	Util.safeCall("destroyToken", function()
+		token.part:Destroy()
+		token.targetValue:Destroy()
+	end)
+	if not table.find(found, token.glyphId) then
+		table.insert(found, token.glyphId)
+	end
+	local glyphName = Glyphs.byId[token.glyphId] and Glyphs.byId[token.glyphId].name or token.glyphId
+	broadcast(token.glyphId, player.DisplayName)
+	Remotes.get(Remotes.Names.Toast):FireAllClients(("%s found a glyph: %s"):format(player.DisplayName, glyphName), 4)
+end
+
+function GlyphService.getSlots(): { [number]: string? }
+	return table.clone(slots)
+end
+
+function GlyphService.getFound(): { string }
+	return table.clone(found)
+end
+
+function GlyphService.stopShift()
+	for _, token in tokens do
+		Util.safeCall("stopToken", function()
+			token.part:Destroy()
+			token.targetValue:Destroy()
+		end)
+	end
+	tokens = {}
+	found = {}
+	slots = {}
+	broadcast(nil, nil)
+	placeDetectorAtRack()
+end
+
+return GlyphService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="30">
+          <Properties>
+            <string name="Name">HauntService</string>
+            <string name="Source"><![CDATA[--!strict
+-- Haunt scheduler + world-scope event implementations. Every event pcall'd; per-event kill switches.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local SoundKit = require(Shared:WaitForChild("SoundKit")) :: any
+local Haunts = require(Shared:WaitForChild("Defs"):WaitForChild("Haunts")) :: any
+local Draw = require(Shared:WaitForChild("Logic"):WaitForChild("Draw")) :: any
+
+local HauntService = {}
+
+local ctx: any
+local generation = 0
+local currentTier = 0
+local lastFired: { [string]: number } = {}
+local participantsGetter: (() -> { Player })? = nil
+
+local function randomParticipant(rng: any): Player?
+	local list = if participantsGetter then participantsGetter() else Players:GetPlayers()
+	return Draw.one(rng, list)
+end
+
+-- ---------- world event implementations ----------
+
+local events: { [string]: (rng: any) -> () } = {}
+
+events.BenchRattle = function(_rng)
+	local bench = ctx.manifest.workbench
+	if not bench then
+		return
+	end
+	local original = bench.CFrame
+	SoundKit.play("BenchRattle", bench)
+	task.spawn(function()
+		for _ = 1, 10 do
+			bench.CFrame = original * CFrame.new((math.random() - 0.5) * 0.3, 0, (math.random() - 0.5) * 0.3)
+			task.wait(0.12)
+		end
+		bench.CFrame = original
+	end)
+end
+
+events.DoorCreakSlam = function(rng)
+	local door = Draw.one(rng, ctx.manifest.hauntDoors)
+	if not door or not door.PrimaryPart then
+		return
+	end
+	local hinge = door.PrimaryPart
+	local original = hinge.CFrame
+	local opened = original * CFrame.Angles(0, math.rad(70), 0)
+	local panel = door:FindFirstChild("Panel")
+	local function setDoor(cf: CFrame)
+		hinge.CFrame = cf
+		if panel and panel:IsA("BasePart") then
+			panel.CFrame = cf * CFrame.new(0, 0, 2)
+		end
+	end
+	task.spawn(function()
+		for i = 1, 30 do
+			setDoor(original:Lerp(opened, i / 30))
+			task.wait(0.1)
+		end
+		task.wait(0.4)
+		SoundKit.play("DoorSlam", hinge)
+		setDoor(original)
+	end)
+end
+
+events.MusicBoxSwell = function(rng)
+	local DollService = ctx.services.DollService
+	local dollId = Draw.one(rng, DollService.getDollIds())
+	if not dollId then
+		return
+	end
+	DollService.performTell(dollId, "MusicBoxTurn")
+	local model = DollService.getModel(dollId)
+	local musicBox = model and model:FindFirstChild("MusicBox")
+	if musicBox then
+		local sound = SoundKit.attach("MusicBoxLoop", musicBox)
+		if sound then
+			sound:Play()
+			task.delay(6, function()
+				sound:Destroy()
+			end)
+		end
+	end
+end
+
+events.SilhouetteDoorway = function(rng)
+	local door = Draw.one(rng, ctx.manifest.hauntDoors)
+	if not door or not door.PrimaryPart then
+		return
+	end
+	local target = randomParticipant(rng)
+	local lookAt = if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+		then (target.Character:FindFirstChild("HumanoidRootPart") :: BasePart).Position
+		else door.PrimaryPart.Position + door.PrimaryPart.CFrame.LookVector * 10
+	local base = door.PrimaryPart.Position
+	local figure = Instance.new("Model")
+	figure.Name = "Silhouette"
+	local function fp(size: Vector3, offset: Vector3)
+		local p = Instance.new("Part")
+		p.Anchored = true
+		p.CanCollide = false
+		p.CanQuery = false
+		p.Material = Enum.Material.SmoothPlastic
+		p.Color = Color3.fromRGB(8, 6, 10)
+		p.Size = size
+		p.CFrame = CFrame.lookAt(Vector3.new(base.X, 0, base.Z) + Vector3.new(0, offset.Y, 0), Vector3.new(lookAt.X, offset.Y, lookAt.Z)) * CFrame.new(offset.X, 0, offset.Z)
+		p.Parent = figure
+	end
+	fp(Vector3.new(1.6, 4.4, 0.9), Vector3.new(0, 3.4, 0)) -- body
+	fp(Vector3.new(1.1, 1.1, 0.9), Vector3.new(0, 6.2, 0)) -- head
+	figure.Parent = ctx.manifest.root
+	task.delay(1.2, function()
+		figure:Destroy()
+	end)
+end
+
+events.WindowFigure = function(rng)
+	local pane = Draw.one(rng, ctx.manifest.windowPanes)
+	if not pane then
+		return
+	end
+	local figure = Instance.new("Part")
+	figure.Anchored = true
+	figure.CanCollide = false
+	figure.CanQuery = false
+	figure.Material = Enum.Material.SmoothPlastic
+	figure.Color = Color3.fromRGB(5, 4, 8)
+	figure.Size = Vector3.new(2, 5, 0.4)
+	figure.CFrame = pane.CFrame * CFrame.new(0, -0.5, -1)
+	figure.Parent = ctx.manifest.root
+	task.delay(1.5, function()
+		figure:Destroy()
+	end)
+end
+
+events.DollHeadSnap = function(rng)
+	local DollService = ctx.services.DollService
+	local dollId = Draw.one(rng, DollService.getDollIds())
+	if dollId then
+		DollService.performTell(dollId, "HeadTurn")
+	end
+end
+
+events.LightsOutBeat = function(_rng)
+	local lamps = ctx.manifest.lamps
+	SoundKit.play("LightsOut")
+	local lights: { Light } = {}
+	for _, lamp in lamps do
+		local light = lamp:FindFirstChildOfClass("PointLight")
+		if light then
+			light.Enabled = false
+			table.insert(lights, light)
+		end
+	end
+	task.delay(2.5, function()
+		for _, light in lights do
+			light.Enabled = true
+		end
+	end)
+end
+
+-- ---------- scheduler ----------
+
+function HauntService.init(context: any)
+	ctx = context
+end
+
+function HauntService.setParticipantsGetter(fn: () -> { Player })
+	participantsGetter = fn
+end
+
+function HauntService.setTier(tier: number)
+	currentTier = tier
+end
+
+function HauntService.force(hauntId: string, rng: any)
+	local def = Haunts.byId[hauntId]
+	if not def then
+		return
+	end
+	lastFired[hauntId] = os.clock()
+	if def.scope == "world" then
+		local impl = events[hauntId]
+		if impl then
+			Util.safeCall("haunt:" .. hauntId, impl, rng)
+		end
+	else
+		if hauntId == "Taken" then
+			if not Config.Features.Taken then
+				return
+			end
+			local list = if participantsGetter then participantsGetter() else Players:GetPlayers()
+			if #list <= 1 then
+				return -- never solo
+			end
+		end
+		local target = randomParticipant(rng)
+		if target then
+			Remotes.get(Remotes.Names.HauntFired):FireClient(target, hauntId, {})
+		end
+	end
+end
+
+function HauntService.startShift(rng: any)
+	generation += 1
+	local myGen = generation
+	lastFired = {}
+	task.spawn(function()
+		while generation == myGen do
+			task.wait(Config.Haunts.MinSecondsBetween + rng:NextNumber() * 15)
+			if generation ~= myGen then
+				break
+			end
+			if not Config.Haunts.Enabled or currentTier < 1 then
+				continue
+			end
+			if ctx.services.DollService.hasActiveLock() then
+				continue
+			end
+			local now = os.clock()
+			local candidates = {}
+			for _, def in Haunts.list do
+				local enabled = Config.Haunts.Events[def.id] ~= false
+				local offCooldown = (now - (lastFired[def.id] or -math.huge)) >= def.cooldown
+				if enabled and offCooldown and def.tier <= currentTier then
+					table.insert(candidates, { id = def.id, weight = def.weight })
+				end
+			end
+			local pick = Draw.weighted(rng, candidates)
+			if pick then
+				HauntService.force(pick, rng)
+			end
+		end
+	end)
+end
+
+function HauntService.stopShift()
+	generation += 1
+	currentTier = 0
+end
+
+return HauntService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="31">
+          <Properties>
+            <string name="Name">LobbyService</string>
+            <string name="Source"><![CDATA[--!strict
+-- Lobby: head billboards (social proof), leaderboard board, ready pad polling, spawn toggling.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+
+local LobbyService = {}
+
+local ctx: any
+
+local function attachBillboard(player: Player, char: Model)
+	local head = char:WaitForChild("Head", 10)
+	if not (head and head:IsA("BasePart")) then
+		return
+	end
+	local humanoid = char:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	end
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "StatsTag"
+	billboard.Adornee = head
+	billboard.Size = UDim2.new(0, 170, 0, 56)
+	billboard.StudsOffset = Vector3.new(0, 2.4, 0)
+	billboard.MaxDistance = Config.Lobby.BillboardMaxDistance
+	billboard.AlwaysOnTop = false
+	billboard.Parent = head
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Size = UDim2.new(1, 0, 0.4, 0)
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.TextScaled = true
+	nameLabel.TextColor3 = Color3.fromRGB(235, 228, 210)
+	nameLabel.TextStrokeTransparency = 0.5
+	nameLabel.Text = player.DisplayName
+	nameLabel.Parent = billboard
+	local statsLabel = Instance.new("TextLabel")
+	statsLabel.Name = "Stats"
+	statsLabel.BackgroundTransparency = 1
+	statsLabel.Position = UDim2.new(0, 0, 0.4, 0)
+	statsLabel.Size = UDim2.new(1, 0, 0.6, 0)
+	statsLabel.Font = Enum.Font.Garamond
+	statsLabel.TextScaled = true
+	statsLabel.TextColor3 = Color3.fromRGB(190, 170, 210)
+	statsLabel.TextStrokeTransparency = 0.6
+	statsLabel.Parent = billboard
+	LobbyService.refreshBillboard(player)
+end
+
+function LobbyService.refreshBillboard(player: Player)
+	local char = player.Character
+	local head = char and char:FindFirstChild("Head")
+	local billboard = head and head:FindFirstChild("StatsTag")
+	local label = billboard and billboard:FindFirstChild("Stats")
+	if label and label:IsA("TextLabel") then
+		local stats = ctx.services.DataService.getStats(player)
+		label.Text = ("Best Shift: %d  ·  Dolls: %d"):format(stats.bestShift, stats.dollsCleared)
+	end
+end
+
+local function refreshLeaderboard()
+	local board = ctx.manifest.leaderboardBoard
+	if not board then
+		return
+	end
+	local gui = board:FindFirstChild("BoardGui")
+	if not gui then
+		gui = Instance.new("SurfaceGui")
+		gui.Name = "BoardGui"
+		gui.Face = Enum.NormalId.Front
+		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+		gui.PixelsPerStud = 40
+		gui.Parent = board
+		local layout = Instance.new("UIListLayout")
+		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		layout.VerticalAlignment = Enum.VerticalAlignment.Top
+		layout.Padding = UDim.new(0, 4)
+		layout.Parent = gui
+	end
+	local sg = gui :: SurfaceGui
+	for _, child in sg:GetChildren() do
+		if child:IsA("TextLabel") then
+			child:Destroy()
+		end
+	end
+	local rows: { { name: string, best: number } } = {}
+	for _, player in Players:GetPlayers() do
+		local stats = ctx.services.DataService.getStats(player)
+		table.insert(rows, { name = player.DisplayName, best = stats.bestShift })
+	end
+	table.sort(rows, function(a, b)
+		return a.best > b.best
+	end)
+	local function addRow(text: string, size: number, color: Color3)
+		local label = Instance.new("TextLabel")
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.new(0.9, 0, 0, size + 6)
+		label.Font = Enum.Font.Garamond
+		label.TextSize = size
+		label.TextColor3 = color
+		label.Text = text
+		label.Parent = sg
+	end
+	addRow("NIGHT SHIFT RECORDS", 40, Color3.fromRGB(226, 216, 196))
+	for i = 1, math.min(#rows, 8) do
+		addRow(("%d.  %s — Shift %d"):format(i, rows[i].name, rows[i].best), 28, Color3.fromRGB(190, 170, 210))
+	end
+end
+
+function LobbyService.init(context: any)
+	ctx = context
+
+	Players.PlayerAdded:Connect(function(player)
+		player.CharacterAdded:Connect(function(char)
+			task.defer(attachBillboard, player, char)
+		end)
+		task.defer(refreshLeaderboard)
+	end)
+	for _, player in Players:GetPlayers() do
+		player.CharacterAdded:Connect(function(char)
+			task.defer(attachBillboard, player, char)
+		end)
+		if player.Character then
+			task.defer(attachBillboard, player, player.Character)
+		end
+	end
+	Players.PlayerRemoving:Connect(function()
+		task.defer(refreshLeaderboard)
+	end)
+
+	ctx.services.DataService.onStatsChanged(function(player: Player)
+		LobbyService.refreshBillboard(player)
+		refreshLeaderboard()
+	end)
+
+	-- ready pad polling at 2 Hz
+	task.spawn(function()
+		while true do
+			task.wait(0.5)
+			local pad = ctx.manifest.readyPad
+			if not pad then
+				continue
+			end
+			local standing: { Player } = {}
+			local parts = workspace:GetPartBoundsInBox(
+				CFrame.new(pad.Position + Vector3.new(0, 3, 0)),
+				Vector3.new(12, 7, 12)
+			)
+			local seen: { [Player]: boolean } = {}
+			for _, part in parts do
+				local char = part:FindFirstAncestorOfClass("Model")
+				if char then
+					local player = Players:GetPlayerFromCharacter(char)
+					if player and not seen[player] then
+						seen[player] = true
+						table.insert(standing, player)
+					end
+				end
+			end
+			Util.safeCall("requestStart", function()
+				ctx.services.ShiftManager.requestStart(standing)
+			end)
+		end
+	end)
+end
+
+function LobbyService.setShiftSpawnActive(active: boolean)
+	local manifest = ctx.manifest
+	if manifest.workshopSpawn then
+		manifest.workshopSpawn.Enabled = active
+	end
+	if manifest.lobbySpawn then
+		manifest.lobbySpawn.Enabled = not active
+	end
+end
+
+return LobbyService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="32">
+          <Properties>
+            <string name="Name">MapBuilder</string>
+            <string name="Source"><![CDATA[--!strict
+-- Builds the entire world from parts at server start (edit mode shows an empty baseplate — expected).
+-- Per-room pcall segments: one broken room can't blank the world (plan review fix).
+
+local CollectionService = game:GetService("CollectionService")
+local Lighting = game:GetService("Lighting")
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Util = require(Shared:WaitForChild("Util")) :: any
+
+local MapBuilder = {}
+
+local WOOD = Color3.fromRGB(62, 44, 32)
+local WOOD_DARK = Color3.fromRGB(41, 29, 22)
+local WALL = Color3.fromRGB(74, 62, 56)
+local FLOOR = Color3.fromRGB(52, 40, 34)
+local ACCENT = Color3.fromRGB(120, 96, 60)
+
+local root: Folder
+
+local function part(props: { [string]: any }): Part
+	local p = Instance.new("Part")
+	p.Anchored = true
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Material = Enum.Material.WoodPlanks
+	p.Color = WOOD
+	for k, v in props do
+		if k == "Tag" then
+			CollectionService:AddTag(p, v)
+		else
+			(p :: any)[k] = v
+		end
+	end
+	p.Parent = props.Parent or root
+	return p
+end
+
+local function box(cf: CFrame, size: Vector3, color: Color3, material: Enum.Material?, name: string?): Part
+	return part({
+		Name = name or "Part",
+		CFrame = cf,
+		Size = size,
+		Color = color,
+		Material = material or Enum.Material.WoodPlanks,
+	})
+end
+
+-- Builds a rectangular room: floor, ceiling, 4 walls with optional door gaps (gapAxis: "X" or "Z" wall openings)
+local function room(center: Vector3, sizeX: number, sizeZ: number, height: number, gaps: { [string]: boolean })
+	local wallT = 1
+	box(CFrame.new(center.X, center.Y - 0.5, center.Z), Vector3.new(sizeX, 1, sizeZ), FLOOR, Enum.Material.Wood, "Floor")
+	box(CFrame.new(center.X, center.Y + height + 0.5, center.Z), Vector3.new(sizeX, 1, sizeZ), WOOD_DARK, Enum.Material.Wood, "Ceiling")
+	local h2 = center.Y + height / 2
+	local function wall(cf: CFrame, size: Vector3, gapKey: string)
+		if gaps[gapKey] then
+			-- split the wall into two segments leaving a 8-stud center gap
+			local along = if size.X > size.Z then "X" else "Z"
+			local full = if along == "X" then size.X else size.Z
+			local seg = (full - 8) / 2
+			if seg > 0.5 then
+				local off = (seg + 8) / 2
+				if along == "X" then
+					box(cf * CFrame.new(-off, 0, 0), Vector3.new(seg, size.Y, size.Z), WALL, Enum.Material.Wood, "Wall")
+					box(cf * CFrame.new(off, 0, 0), Vector3.new(seg, size.Y, size.Z), WALL, Enum.Material.Wood, "Wall")
+				else
+					box(cf * CFrame.new(0, 0, -off), Vector3.new(size.X, size.Y, seg), WALL, Enum.Material.Wood, "Wall")
+					box(cf * CFrame.new(0, 0, off), Vector3.new(size.X, size.Y, seg), WALL, Enum.Material.Wood, "Wall")
+				end
+				-- lintel above the gap
+				box(cf * CFrame.new(0, size.Y / 2 - 1.5, 0), Vector3.new(if along == "X" then 8 else size.X, 3, if along == "Z" then 8 else size.Z), WALL, Enum.Material.Wood, "Lintel")
+			end
+		else
+			box(cf, size, WALL, Enum.Material.Wood, "Wall")
+		end
+	end
+	wall(CFrame.new(center.X, h2, center.Z - sizeZ / 2), Vector3.new(sizeX, height, wallT), "N")
+	wall(CFrame.new(center.X, h2, center.Z + sizeZ / 2), Vector3.new(sizeX, height, wallT), "S")
+	wall(CFrame.new(center.X - sizeX / 2, h2, center.Z), Vector3.new(wallT, height, sizeZ), "W")
+	wall(CFrame.new(center.X + sizeX / 2, h2, center.Z), Vector3.new(wallT, height, sizeZ), "E")
+end
+
+local function lamp(pos: Vector3): Part
+	local base = part({
+		Name = "Lamp",
+		CFrame = CFrame.new(pos),
+		Size = Vector3.new(0.8, 2.2, 0.8),
+		Color = ACCENT,
+		Material = Enum.Material.Metal,
+		Tag = "Lamp",
+	})
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 190, 120)
+	light.Brightness = 1.4
+	light.Range = 16
+	light.Shadows = true
+	light.Parent = base
+	return base
+end
+
+local function surfaceText(parent: Part, face: Enum.NormalId, lines: { { text: string, size: number, color: Color3? } })
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = face
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 40
+	gui.Parent = parent
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, 8)
+	layout.Parent = gui
+	for _, line in lines do
+		local label = Instance.new("TextLabel")
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.new(0.92, 0, 0, line.size + 8)
+		label.Font = Enum.Font.Garamond
+		label.TextSize = line.size
+		label.TextWrapped = true
+		label.TextColor3 = line.color or Color3.fromRGB(226, 216, 196)
+		label.Text = line.text
+		label.Parent = gui
+	end
+	return gui
+end
+
+local function prompt(parentPart: Part, action: string, object: string, holdSeconds: number?): ProximityPrompt
+	local p = Instance.new("ProximityPrompt")
+	p.ActionText = action
+	p.ObjectText = object
+	p.RequiresLineOfSight = false
+	p.MaxActivationDistance = 8
+	p.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+	p.HoldDuration = holdSeconds or 0
+	p.Parent = parentPart
+	return p
+end
+
+-- Layout constants: lobby around origin, workshop 240 studs +X.
+local LOBBY = Vector3.new(0, 0, 0)
+local SHOP = Vector3.new(240, 0, 0)
+local H = 14
+
+function MapBuilder.build(): (any, { string })
+	local failures: { string } = {}
+	local manifest: any = { benchSlots = {}, glyphSpawns = {}, lamps = {}, hauntDoors = {}, windowPanes = {} }
+
+	root = Instance.new("Folder")
+	root.Name = "PorcelainMap"
+	root.Parent = workspace
+	manifest.root = root
+
+	local function segment(name: string, fn: () -> ...any)
+		local ok, err = pcall(fn)
+		if not ok then
+			table.insert(failures, name)
+			Util.warn(("MapBuilder segment '%s' FAILED: %s"):format(name, tostring(err)))
+		end
+	end
+
+	segment("Lobby", function()
+		room(LOBBY, 44, 44, H, { E = true })
+		-- warm lobby lamps
+		lamp(LOBBY + Vector3.new(-16, 1.1, -16))
+		lamp(LOBBY + Vector3.new(-16, 1.1, 16))
+		lamp(LOBBY + Vector3.new(16, 1.1, -16))
+		-- spawn
+		local spawn = Instance.new("SpawnLocation")
+		spawn.Anchored = true
+		spawn.Neutral = true
+		spawn.Enabled = true
+		spawn.Transparency = 1
+		spawn.CanCollide = false
+		spawn.Size = Vector3.new(8, 1, 8)
+		spawn.CFrame = CFrame.new(LOBBY + Vector3.new(-10, 0.5, 0))
+		CollectionService:AddTag(spawn, "LobbySpawn")
+		spawn.Parent = root
+		manifest.lobbySpawn = spawn
+		-- ready pad: glowing circle
+		local pad = part({
+			Name = "ReadyPad",
+			Shape = Enum.PartType.Cylinder,
+			CFrame = CFrame.new(LOBBY + Vector3.new(12, 0.15, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+			Size = Vector3.new(0.3, 12, 12),
+			Color = Color3.fromRGB(150, 120, 220),
+			Material = Enum.Material.Neon,
+			Transparency = 0.55,
+			CanCollide = false,
+			Tag = "ReadyPad",
+		})
+		manifest.readyPad = pad
+		local padLabel = part({
+			Name = "ReadyPadSign",
+			CFrame = CFrame.new(LOBBY + Vector3.new(12, 6.5, -7)),
+			Size = Vector3.new(8, 3, 0.4),
+			Color = WOOD_DARK,
+		})
+		surfaceText(padLabel, Enum.NormalId.Front, {
+			{ text = "STAND HERE", size = 42 },
+			{ text = "to start the night shift", size = 24 },
+		})
+		-- chalkboard
+		local chalk = part({
+			Name = "Chalkboard",
+			CFrame = CFrame.new(LOBBY + Vector3.new(0, 7, -21.4)),
+			Size = Vector3.new(18, 9, 0.5),
+			Color = Color3.fromRGB(24, 30, 26),
+			Material = Enum.Material.SmoothPlastic,
+			Tag = "Chalkboard",
+		})
+		surfaceText(chalk, Enum.NormalId.Front, {
+			{ text = "HOUSE RULES", size = 46, color = Color3.fromRGB(232, 226, 205) },
+			{ text = "1. CARE for every doll.", size = 30 },
+			{ text = "2. WATCH for the wrong one.", size = 30 },
+			{ text = "3. FIND the glyphs. Match the ledger.", size = 30 },
+			{ text = "4. BANISH it before the Presence takes you.", size = 30 },
+			{ text = '"...and always tie the silver ribbon before a banishing. Always." — The Dollmaker', size = 22, color = Color3.fromRGB(170, 150, 190) },
+		})
+		manifest.chalkboard = chalk
+		-- leaderboard
+		local board = part({
+			Name = "LeaderboardBoard",
+			CFrame = CFrame.new(LOBBY + Vector3.new(-21.4, 7, 0)) * CFrame.Angles(0, math.rad(90), 0),
+			Size = Vector3.new(12, 9, 0.5),
+			Color = WOOD_DARK,
+			Tag = "LeaderboardBoard",
+		})
+		manifest.leaderboardBoard = board
+	end)
+
+	segment("Corridor", function()
+		-- long connector from lobby to workshop with moonlit windows
+		local mid = (LOBBY + SHOP) / 2
+		local len = SHOP.X - LOBBY.X - 44
+		room(Vector3.new(mid.X, 0, 0), len, 12, H - 4, { W = true, E = true })
+		for i = 1, 3 do
+			local x = LOBBY.X + 44 + (len / 4) * i - len / 8
+			local pane = part({
+				Name = "WindowPane",
+				CFrame = CFrame.new(x, 8, -6 + 0.2),
+				Size = Vector3.new(5, 6, 0.2),
+				Color = Color3.fromRGB(150, 170, 220),
+				Material = Enum.Material.Glass,
+				Transparency = 0.6,
+				CanCollide = false,
+				Tag = "WindowPane",
+			})
+			table.insert(manifest.windowPanes, pane)
+			local moon = Instance.new("SpotLight")
+			moon.Color = Color3.fromRGB(160, 180, 255)
+			moon.Brightness = 0.8
+			moon.Range = 24
+			moon.Angle = 60
+			moon.Face = Enum.NormalId.Front
+			moon.Parent = pane
+		end
+	end)
+
+	segment("WorkshopDoor", function()
+		-- lockable door at the workshop end of the corridor
+		local doorModel = Instance.new("Model")
+		doorModel.Name = "WorkshopDoor"
+		CollectionService:AddTag(doorModel, "WorkshopDoor")
+		doorModel.Parent = root
+		local slab = part({
+			Name = "Slab",
+			CFrame = CFrame.new(SHOP.X - 23, 5, 0),
+			Size = Vector3.new(1.2, 10, 8),
+			Color = WOOD_DARK,
+			Material = Enum.Material.Wood,
+			Parent = doorModel,
+		})
+		doorModel.PrimaryPart = slab
+		local sign = part({
+			Name = "Sign",
+			CFrame = CFrame.new(SHOP.X - 23.8, 9, 0) * CFrame.Angles(0, math.rad(-90), 0),
+			Size = Vector3.new(6, 2, 0.3),
+			Color = Color3.fromRGB(30, 24, 28),
+			Parent = doorModel,
+		})
+		surfaceText(sign, Enum.NormalId.Front, { { text = "", size = 30 } })
+		manifest.workshopDoor = doorModel
+		manifest.workshopDoorSign = sign
+	end)
+
+	segment("BenchRoom", function()
+		-- main workshop: bench room
+		room(SHOP, 44, 36, H, { W = true, N = true, S = true })
+		lamp(SHOP + Vector3.new(-18, 1.1, -14))
+		lamp(SHOP + Vector3.new(-18, 1.1, 14))
+		lamp(SHOP + Vector3.new(18, 1.1, 0))
+		-- workbench along the north side
+		local bench = box(CFrame.new(SHOP.X, 2, SHOP.Z - 13), Vector3.new(34, 4, 6), WOOD, Enum.Material.Wood, "Workbench")
+		CollectionService:AddTag(bench, "Workbench")
+		manifest.workbench = bench
+		for i = 1, 5 do
+			local slot = part({
+				Name = "BenchSlot" .. i,
+				CFrame = CFrame.new(SHOP.X - 17 + (i - 1) * 8.5, 4.6, SHOP.Z - 13),
+				Size = Vector3.new(1, 1, 1),
+				Transparency = 1,
+				CanCollide = false,
+				CanQuery = false,
+				Tag = "BenchSlot",
+			})
+			table.insert(manifest.benchSlots, slot)
+		end
+		-- ribbon spool on the bench end
+		local spool = part({
+			Name = "RibbonSpool",
+			CFrame = CFrame.new(SHOP.X + 19, 4.8, SHOP.Z - 13),
+			Size = Vector3.new(1.6, 1.6, 1.6),
+			Color = Color3.fromRGB(200, 205, 215),
+			Material = Enum.Material.Metal,
+			Tag = "RibbonSpool",
+		})
+		manifest.ribbonSpool = spool
+		manifest.ribbonPrompt = prompt(spool, "Take Silver Ribbon", "Ribbon Spool")
+		-- workshop spawn (disabled by default; toggled during shifts)
+		local wspawn = Instance.new("SpawnLocation")
+		wspawn.Anchored = true
+		wspawn.Neutral = true
+		wspawn.Enabled = false
+		wspawn.Transparency = 1
+		wspawn.CanCollide = false
+		wspawn.Size = Vector3.new(6, 1, 6)
+		wspawn.CFrame = CFrame.new(SHOP + Vector3.new(0, 0.5, 8))
+		CollectionService:AddTag(wspawn, "WorkshopSpawn")
+		wspawn.Parent = root
+		manifest.workshopSpawn = wspawn
+	end)
+
+	segment("StorageAlcove", function()
+		local c = SHOP + Vector3.new(0, 0, -36 + 6)
+		room(Vector3.new(SHOP.X, 0, SHOP.Z - 36), 20, 20, H - 4, { S = true })
+		-- shelves with silhouette decor dolls
+		for i = 1, 3 do
+			local shelf = box(CFrame.new(SHOP.X - 8 + (i - 1) * 8, 5, SHOP.Z - 44), Vector3.new(6, 0.6, 3), WOOD_DARK, Enum.Material.Wood, "Shelf")
+			for j = 1, 3 do
+				box(
+					shelf.CFrame * CFrame.new(-2 + (j - 1) * 2, 1.2, 0),
+					Vector3.new(0.9, 1.8, 0.7),
+					Color3.fromRGB(25, 20, 24),
+					Enum.Material.SmoothPlastic,
+					"DecorDoll"
+				)
+			end
+		end
+		local _ = c
+	end)
+
+	segment("LedgerRoom", function()
+		room(Vector3.new(SHOP.X, 0, SHOP.Z + 36), 24, 24, H - 4, { N = true })
+		lamp(Vector3.new(SHOP.X - 8, 1.1, SHOP.Z + 42))
+		local desk = box(CFrame.new(SHOP.X, 2, SHOP.Z + 42), Vector3.new(8, 4, 4), WOOD, Enum.Material.Wood, "LedgerDesk")
+		CollectionService:AddTag(desk, "LedgerDesk")
+		local book = box(desk.CFrame * CFrame.new(0, 2.3, 0) * CFrame.Angles(0, 0, math.rad(8)), Vector3.new(3, 0.6, 2.2), Color3.fromRGB(90, 40, 40), Enum.Material.Fabric, "LedgerBook")
+		manifest.ledgerDesk = desk
+		manifest.ledgerPrompt = prompt(book, "Open Ledger", "Spirit Ledger")
+		-- detector rack beside the desk
+		local rack = part({
+			Name = "DetectorRack",
+			CFrame = CFrame.new(SHOP.X + 8, 3, SHOP.Z + 42),
+			Size = Vector3.new(2, 6, 2),
+			Color = WOOD_DARK,
+			Tag = "DetectorRack",
+		})
+		manifest.detectorRack = rack
+	end)
+
+	segment("BanishRoom", function()
+		-- east of bench room through the E gap? bench room gaps: W (corridor), N (storage... wait N is -Z toward storage), S (ledger +Z)
+		room(Vector3.new(SHOP.X + 36, 0, SHOP.Z), 28, 22, H - 2, { W = true })
+		-- carve the E wall gap of bench room handled by bench room's own walls (it has no E gap) — add a doorway connector
+		box(CFrame.new(SHOP.X + 22, H / 2, SHOP.Z), Vector3.new(2.5, H, 8), FLOOR, Enum.Material.Wood, "BanishDoorwayFloorPatch")
+		local boxModel = Instance.new("Model")
+		boxModel.Name = "BanishBox"
+		CollectionService:AddTag(boxModel, "BanishBox")
+		boxModel.Parent = root
+		local base = part({
+			Name = "Base",
+			CFrame = CFrame.new(SHOP.X + 40, 2.2, SHOP.Z),
+			Size = Vector3.new(4, 4.4, 7),
+			Color = Color3.fromRGB(38, 26, 40),
+			Material = Enum.Material.Wood,
+			Parent = boxModel,
+		})
+		boxModel.PrimaryPart = base
+		local lid = part({
+			Name = "Lid",
+			CFrame = base.CFrame * CFrame.new(-2.4, 1.4, 0) * CFrame.Angles(0, 0, math.rad(70)),
+			Size = Vector3.new(4, 0.6, 7),
+			Color = Color3.fromRGB(48, 32, 52),
+			Material = Enum.Material.Wood,
+			Parent = boxModel,
+		})
+		local glow = Instance.new("PointLight")
+		glow.Color = Color3.fromRGB(180, 120, 255)
+		glow.Brightness = 0
+		glow.Range = 12
+		glow.Parent = base
+		manifest.banishBox = boxModel
+		manifest.banishLid = lid
+		manifest.banishGlow = glow
+		local depositPrompt = prompt(base, "Place the doll inside", "Banish Box", 0.5)
+		depositPrompt.Enabled = false
+		manifest.banishPrompt = depositPrompt
+		lamp(Vector3.new(SHOP.X + 46, 1.1, SHOP.Z - 8))
+	end)
+
+	segment("HauntDoors", function()
+		-- two hinged doors: storage entrance + ledger entrance
+		local defs = {
+			{ pos = Vector3.new(SHOP.X - 4, 0, SHOP.Z - 18), rotY = 0 },
+			{ pos = Vector3.new(SHOP.X + 4, 0, SHOP.Z + 18), rotY = 180 },
+		}
+		for i, def in defs do
+			local doorModel = Instance.new("Model")
+			doorModel.Name = "HauntDoor" .. i
+			CollectionService:AddTag(doorModel, "HauntDoor")
+			doorModel.Parent = root
+			local hinge = part({
+				Name = "Hinge",
+				CFrame = CFrame.new(def.pos + Vector3.new(0, 5, 0)) * CFrame.Angles(0, math.rad(def.rotY), 0),
+				Size = Vector3.new(0.4, 10, 0.4),
+				Transparency = 1,
+				CanCollide = false,
+				Parent = doorModel,
+			})
+			doorModel.PrimaryPart = hinge
+			part({
+				Name = "Panel",
+				CFrame = hinge.CFrame * CFrame.new(0, 0, 2),
+				Size = Vector3.new(0.5, 9.6, 4),
+				Color = WOOD_DARK,
+				Material = Enum.Material.Wood,
+				CanCollide = false,
+				Parent = doorModel,
+			})
+			table.insert(manifest.hauntDoors, doorModel)
+		end
+	end)
+
+	segment("GlyphSpawns", function()
+		local spots = {
+			SHOP + Vector3.new(-19, 5.5, 10), -- bench room shadow corner
+			SHOP + Vector3.new(14, 1.5, 15), -- bench room floor
+			SHOP + Vector3.new(-6, 5.8, -44), -- storage shelf
+			SHOP + Vector3.new(8, 1.5, -40), -- storage floor corner
+			SHOP + Vector3.new(-9, 1.5, 40), -- ledger room corner
+			SHOP + Vector3.new(10, 6, 44), -- ledger room high shelf level
+			SHOP + Vector3.new(46, 1.5, 6), -- banish room corner
+			SHOP + Vector3.new(34, 7, -8), -- banish room high
+			Vector3.new((LOBBY.X + SHOP.X) / 2, 2, 4), -- corridor
+			Vector3.new((LOBBY.X + SHOP.X) / 2 + 30, 8, -4), -- corridor high
+		}
+		for i, pos in spots do
+			local marker = part({
+				Name = "GlyphSpawn" .. i,
+				CFrame = CFrame.new(pos),
+				Size = Vector3.new(0.5, 0.5, 0.5),
+				Transparency = 1,
+				CanCollide = false,
+				CanQuery = false,
+				Tag = "GlyphSpawn",
+			})
+			table.insert(manifest.glyphSpawns, marker)
+		end
+	end)
+
+	segment("Atmosphere", function()
+		Lighting.FogEnd = 140
+		Lighting.FogStart = 30
+		Lighting.FogColor = Color3.fromRGB(18, 14, 22)
+		local atmo = Instance.new("Atmosphere")
+		atmo.Density = 0.35
+		atmo.Color = Color3.fromRGB(120, 110, 130)
+		atmo.Parent = Lighting
+		-- collect lamps into manifest
+		for _, inst in CollectionService:GetTagged("Lamp") do
+			table.insert(manifest.lamps, inst)
+		end
+	end)
+
+	Util.log(("MapBuilder: built with %d failed segment(s)"):format(#failures))
+	return manifest, failures
+end
+
+function MapBuilder.init(_ctx: any) end
+
+return MapBuilder
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="33">
+          <Properties>
+            <string name="Name">PresenceService</string>
+            <string name="Source"><![CDATA[--!strict
+-- The Presence meter: wraps Logic/PresenceMath in a heartbeat loop; broadcasts tier changes.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local PresenceMath = require(Shared:WaitForChild("Logic"):WaitForChild("PresenceMath")) :: any
+
+local PresenceService = {}
+
+local ctx: any
+local state: any = nil
+local rateMultiplier = 1
+local running = false
+local maxedFired = false
+local lastTier = -1
+local maxedCallbacks: { () -> () } = {}
+local connection: RBXScriptConnection? = nil
+
+local mathCfg = {
+	Max = Config.Presence.Max,
+	BaseFillPerSecond = Config.Presence.BaseFillPerSecond,
+	LastDollAccelMultiplier = Config.Presence.LastDollAccelMultiplier,
+	RushWindowSeconds = Config.Presence.RushSurge.WindowSeconds,
+	RushStepsInWindow = Config.Presence.RushSurge.StepsInWindow,
+	RushSurgeAmount = Config.Presence.RushSurge.SurgeAmount,
+	RushDecayPerSecond = Config.Presence.RushSurge.DecayPerSecond,
+	Tiers = Config.Presence.Tiers,
+}
+
+local function pushTier()
+	local tier = if state then PresenceMath.tier(state, mathCfg) else 0
+	if tier ~= lastTier then
+		lastTier = tier
+		Remotes.get(Remotes.Names.PresenceTier):FireAllClients(tier)
+		Util.safeCall("hauntSetTier", function()
+			ctx.services.HauntService.setTier(tier)
+		end)
+	end
+end
+
+function PresenceService.init(context: any)
+	ctx = context
+end
+
+function PresenceService.startShift(multiplier: number)
+	rateMultiplier = multiplier
+	state = PresenceMath.new()
+	maxedFired = false
+	running = true
+	lastTier = -1
+	pushTier()
+	if connection then
+		connection:Disconnect()
+	end
+	local acc = 0
+	connection = RunService.Heartbeat:Connect(function(dt: number)
+		if not running or not state then
+			return
+		end
+		acc += dt
+		if acc < 0.1 then
+			return
+		end
+		PresenceMath.step(state, mathCfg, acc, rateMultiplier)
+		acc = 0
+		pushTier()
+		if not maxedFired and PresenceMath.isMaxed(state, mathCfg) then
+			maxedFired = true
+			for _, cb in maxedCallbacks do
+				Util.safeCall("presenceMaxed", cb)
+			end
+		end
+	end)
+end
+
+function PresenceService.stop()
+	running = false
+	if connection then
+		connection:Disconnect()
+		connection = nil
+	end
+	state = nil
+	lastTier = -1
+	Remotes.get(Remotes.Names.PresenceTier):FireAllClients(0)
+end
+
+function PresenceService.surge(amount: number)
+	if state then
+		PresenceMath.addSurge(state, amount)
+	end
+end
+
+function PresenceService.notifyStepCompleted()
+	if state then
+		PresenceMath.onStepCompleted(state, mathCfg, os.clock())
+	end
+end
+
+function PresenceService.setAllDollsDone(done: boolean)
+	if state then
+		state.allDollsDone = done
+	end
+end
+
+function PresenceService.getTier(): number
+	return if state then PresenceMath.tier(state, mathCfg) else 0
+end
+
+function PresenceService.getValue(): number
+	return if state then state.value else 0
+end
+
+function PresenceService.setValue(v: number)
+	if state then
+		state.value = math.clamp(v, 0, mathCfg.Max)
+		pushTier()
+	end
+end
+
+function PresenceService.onMaxed(fn: () -> ())
+	table.insert(maxedCallbacks, fn)
+end
+
+return PresenceService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="34">
+          <Properties>
+            <string name="Name">ShiftManager</string>
+            <string name="Source"><![CDATA[--!strict
+-- The state machine. Owns states, participants, shift number, strikes, spirit, correctness, recap.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local Spirits = require(Shared:WaitForChild("Defs"):WaitForChild("Spirits")) :: any
+local Glyphs = require(Shared:WaitForChild("Defs"):WaitForChild("Glyphs")) :: any
+local DollNames = require(Shared:WaitForChild("Defs"):WaitForChild("DollNames")) :: any
+local GlyphMatch = require(Shared:WaitForChild("Logic"):WaitForChild("GlyphMatch")) :: any
+local Escalation = require(Shared:WaitForChild("Logic"):WaitForChild("Escalation")) :: any
+local Draw = require(Shared:WaitForChild("Logic"):WaitForChild("Draw")) :: any
+
+local ShiftManager = {}
+
+local ctx: any
+local state = "LobbyIdle"
+local stateGen = 0 -- bumped on every transition; kills stale watchdogs/timers
+local participants: { Player } = {}
+local shiftNumber = 1
+local strikes = 0
+local spirit: any = nil
+local shiftParams: any = nil
+local runStats = { dollsCleared = 0, perfect = 0, strikesThisShift = 0 }
+local countdownActive = false
+
+local escalationCfg = {
+	BaseDollCount = Config.Shift.BaseDollCount,
+	SoloDollCap = Config.Shift.SoloDollCap,
+	MaxDollCount = Config.Shift.MaxDollCount,
+	DollCountShiftMilestones = Config.Shift.DollCountShiftMilestones,
+	BaseFakeTellChance = Config.Tells.FakeTellChancePerWindow,
+	BaseTellIntervalMin = Config.Tells.BaseIntervalSeconds.min,
+	BaseTellIntervalMax = Config.Tells.BaseIntervalSeconds.max,
+	GlyphsPerShift = Config.Glyphs.PerShift,
+}
+
+-- ---------- helpers ----------
+
+local function currentObjective(): string
+	if state == "LobbyIdle" then
+		return "Stand on the glowing pad to start the night shift."
+	elseif state == "ShiftIntro" then
+		return "The dolls are arriving…"
+	elseif state ~= "ShiftActive" then
+		return ""
+	end
+	local DollService = ctx.services.DollService
+	local GlyphService = ctx.services.GlyphService
+	local remaining = 0
+	for _, id in DollService.getDollIds() do
+		if DollService.nextStepFor(id) ~= nil then
+			remaining += 1
+		end
+	end
+	if remaining > 0 then
+		return ("Care for the dolls — %d still need%s work."):format(remaining, if remaining == 1 then "s" else "")
+	end
+	local found = #GlyphService.getFound()
+	local total = if spirit then #spirit.code else 3
+	if found < total then
+		return ("Find the glyphs — %d of %d found."):format(found, total)
+	end
+	local slots = GlyphService.getSlots()
+	if not (spirit and GlyphMatch.matches(spirit.code, slots)) then
+		return "Match the spirit in the ledger."
+	end
+	return "Bring the WRONG doll to the Banish Box."
+end
+
+local function broadcastState()
+	Remotes.get(Remotes.Names.StateChanged):FireAllClients(state, {
+		shift = shiftNumber,
+		strikes = strikes,
+		objective = currentObjective(),
+	})
+end
+
+local function setDoorLocked(locked: boolean)
+	local door = ctx.manifest.workshopDoor
+	local slab = door and door:FindFirstChild("Slab")
+	if slab and slab:IsA("BasePart") then
+		slab.CanCollide = locked
+		slab.Transparency = if locked then 0 else 0.85
+	end
+	local sign = ctx.manifest.workshopDoorSign
+	local gui = sign and sign:FindFirstChildOfClass("SurfaceGui")
+	local label = gui and gui:FindFirstChildOfClass("TextLabel")
+	if label then
+		label.Text = if locked then ("Shift %d in progress…"):format(shiftNumber) else "The workshop is open."
+	end
+end
+
+local function teleportTo(spawnPart: BasePart?, players: { Player })
+	if not spawnPart then
+		return
+	end
+	for i, player in players do
+		local char = player.Character
+		if char then
+			local angle = (i - 1) * (math.pi * 2 / math.max(#players, 1))
+			char:PivotTo(spawnPart.CFrame * CFrame.new(math.cos(angle) * 3, 3, math.sin(angle) * 3))
+		end
+	end
+end
+
+local function pruneParticipants()
+	for i = #participants, 1, -1 do
+		if participants[i].Parent == nil then
+			table.remove(participants, i)
+		end
+	end
+end
+
+local transition -- forward decl
+
+local function armWatchdog(forState: string, gen: number)
+	local seconds = Config.Shift.Watchdog[forState]
+	if not seconds then
+		return
+	end
+	task.delay(seconds, function()
+		if state == forState and stateGen == gen then
+			Util.warn(("WATCHDOG: state '%s' exceeded %ds — forcing transition"):format(forState, seconds))
+			Remotes.get(Remotes.Names.Toast):FireAllClients(("watchdog: forcing past %s"):format(forState), 4)
+			if forState == "ShiftIntro" then
+				transition("ShiftActive")
+			elseif forState == "ShiftActive" then
+				transition("RunEnd")
+			elseif forState == "ShiftResult" then
+				transition("ShiftIntro")
+			elseif forState == "RunEnd" then
+				transition("LobbyIdle")
+			end
+		end
+	end)
+end
+
+local function stopShiftSystems()
+	Util.safeCall("stopTells", ctx.services.TellService.stopShift)
+	Util.safeCall("stopHaunts", ctx.services.HauntService.stopShift)
+	Util.safeCall("stopPresence", ctx.services.PresenceService.stop)
+end
+
+local function cleanupRun()
+	stopShiftSystems()
+	Util.safeCall("banishReset", ctx.services.BanishService.reset)
+	Util.safeCall("clearDolls", ctx.services.DollService.clearShift)
+	Util.safeCall("stopGlyphs", ctx.services.GlyphService.stopShift)
+	Util.safeCall("spawnToggle", function()
+		ctx.services.LobbyService.setShiftSpawnActive(false)
+	end)
+end
+
+-- ---------- states ----------
+
+transition = function(newState: string)
+	stateGen += 1
+	local gen = stateGen
+	state = newState
+	broadcastState()
+	armWatchdog(newState, gen)
+
+	if newState == "LobbyIdle" then
+		shiftNumber = 1
+		strikes = 0
+		spirit = nil
+		runStats = { dollsCleared = 0, perfect = 0, strikesThisShift = 0 }
+		participants = {}
+		setDoorLocked(false)
+		cleanupRun()
+	elseif newState == "ShiftIntro" then
+		pruneParticipants()
+		if #participants == 0 then
+			transition("LobbyIdle")
+			return
+		end
+		setDoorLocked(true)
+		Util.safeCall("spawnToggle", function()
+			ctx.services.LobbyService.setShiftSpawnActive(true)
+		end)
+		runStats.strikesThisShift = 0
+		spirit = Draw.one(ctx.rng, Spirits.list)
+		shiftParams = Escalation.forShift(escalationCfg, shiftNumber, #participants)
+		local names = Draw.sample(ctx.rng, DollNames, shiftParams.dollCount)
+		local markedIndex = ctx.rng:NextInteger(1, shiftParams.dollCount)
+		local dollInfos = ctx.services.DollService.spawnShift(shiftParams, names, markedIndex, ctx.rng)
+		ctx.services.GlyphService.startShift(spirit.code, ctx.rng)
+		teleportTo(ctx.manifest.workshopSpawn, participants)
+		Remotes.get(Remotes.Names.ShiftData):FireAllClients({
+			shift = shiftNumber,
+			dolls = dollInfos,
+			glyphTotal = #spirit.code,
+		})
+		task.delay(Config.Shift.IntroSeconds, function()
+			if state == "ShiftIntro" and stateGen == gen then
+				transition("ShiftActive")
+			end
+		end)
+	elseif newState == "ShiftActive" then
+		ctx.services.PresenceService.startShift(shiftParams.presenceRateMultiplier)
+		ctx.services.TellService.startShift(shiftParams, ctx.rng)
+		ctx.services.HauntService.startShift(ctx.rng)
+	elseif newState == "ShiftResult" then
+		stopShiftSystems()
+		task.delay(Config.Shift.ResultSeconds, function()
+			if state == "ShiftResult" and stateGen == gen then
+				-- merge lobby players standing on the pad into the next shift (plan review: joiner topology)
+				transition("ShiftIntro")
+			end
+		end)
+	elseif newState == "RunEnd" then
+		stopShiftSystems()
+		-- THE scare
+		Remotes.get(Remotes.Names.HauntFired):FireAllClients("DollmakerReveal", {})
+		for _, lamp in ctx.manifest.lamps do
+			local light = lamp:FindFirstChildOfClass("PointLight")
+			if light then
+				light.Enabled = false
+			end
+		end
+		local traitorId = ctx.services.DollService.getMarkedId()
+		local traitorName = if traitorId then ctx.services.DollService.getDisplayName(traitorId) else "…someone"
+		task.delay(4, function()
+			if stateGen ~= gen then
+				return
+			end
+			for _, lamp in ctx.manifest.lamps do
+				local light = lamp:FindFirstChildOfClass("PointLight")
+				if light then
+					light.Enabled = true
+				end
+			end
+			pruneParticipants()
+			for _, player in participants do
+				local stats = ctx.services.DataService.getStats(player)
+				local isNewBest = shiftNumber - 1 > 0 and shiftNumber - 1 > stats.bestShift
+				ctx.services.DataService.recordRun(player, {
+					shiftReached = shiftNumber - 1,
+					dollsCleared = runStats.dollsCleared,
+					perfect = runStats.perfect,
+				})
+				Remotes.get(Remotes.Names.Recap):FireClient(player, {
+					shiftReached = shiftNumber - 1,
+					dollsCleared = runStats.dollsCleared,
+					perfect = runStats.perfect > 0 and strikes == 0,
+					traitorName = traitorName,
+					bestShift = math.max(stats.bestShift, shiftNumber - 1),
+					isNewBest = isNewBest,
+				})
+			end
+			cleanupRun()
+			teleportTo(ctx.manifest.lobbySpawn, participants)
+			transition("LobbyIdle")
+		end)
+	end
+end
+
+-- ---------- public API ----------
+
+function ShiftManager.init(context: any)
+	ctx = context
+
+	ctx.services.HauntService.setParticipantsGetter(function()
+		pruneParticipants()
+		return table.clone(participants)
+	end)
+
+	ctx.services.DollService.onStepCompleted(function(_player: Player, _dollId: string, _stepId: string)
+		ctx.services.PresenceService.notifyStepCompleted()
+		if state == "ShiftActive" and ctx.services.DollService.allListedCareDone() then
+			ctx.services.PresenceService.setAllDollsDone(true)
+			ctx.services.BanishService.setUnlocked(true)
+		end
+		broadcastState()
+	end)
+
+	ctx.services.PresenceService.onMaxed(function()
+		if state == "ShiftActive" then
+			transition("RunEnd")
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function(player)
+		local idx = table.find(participants, player)
+		if idx then
+			table.remove(participants, idx)
+		end
+		if #participants == 0 and (state == "ShiftIntro" or state == "ShiftActive" or state == "ShiftResult") then
+			transition("LobbyIdle")
+		end
+	end)
+
+	Players.PlayerAdded:Connect(function(player)
+		-- late joiners get current state so their HUD isn't blank
+		task.delay(3, function()
+			if player.Parent then
+				Remotes.get(Remotes.Names.StateChanged):FireClient(player, state, {
+					shift = shiftNumber,
+					strikes = strikes,
+					objective = currentObjective(),
+				})
+			end
+		end)
+	end)
+
+	broadcastState()
+	setDoorLocked(false)
+end
+
+function ShiftManager.requestStart(standing: { Player })
+	if state ~= "LobbyIdle" then
+		return
+	end
+	if #standing == 0 then
+		if countdownActive then
+			countdownActive = false
+			Remotes.get(Remotes.Names.ReadyCountdown):FireAllClients(nil)
+		end
+		return
+	end
+	participants = table.clone(standing)
+	if countdownActive then
+		return
+	end
+	countdownActive = true
+	task.spawn(function()
+		for remaining = Config.Lobby.ReadyCountdownSeconds, 1, -1 do
+			if not countdownActive or state ~= "LobbyIdle" then
+				return
+			end
+			pruneParticipants()
+			if #participants == 0 then
+				countdownActive = false
+				Remotes.get(Remotes.Names.ReadyCountdown):FireAllClients(nil)
+				return
+			end
+			Remotes.get(Remotes.Names.ReadyCountdown):FireAllClients(remaining)
+			task.wait(1)
+		end
+		if countdownActive and state == "LobbyIdle" then
+			countdownActive = false
+			Remotes.get(Remotes.Names.ReadyCountdown):FireAllClients(nil)
+			transition("ShiftIntro")
+		end
+	end)
+end
+
+function ShiftManager.onBanishResolved(dollId: string)
+	if state ~= "ShiftActive" then
+		return
+	end
+	local DollService = ctx.services.DollService
+	local GlyphService = ctx.services.GlyphService
+	local dollName = DollService.getDisplayName(dollId)
+	local isMarked = DollService.isMarked(dollId)
+	local slotsMatch = spirit ~= nil and GlyphMatch.matches(spirit.code, GlyphService.getSlots())
+	local hasRibbon = DollService.hasRibbon(dollId)
+	local correct = isMarked and slotsMatch and hasRibbon
+
+	DollService.consume(dollId)
+
+	if correct then
+		Remotes.get(Remotes.Names.BanishResult):FireAllClients({
+			correct = true,
+			dollId = dollId,
+			dollName = dollName,
+			spiritName = spirit.name,
+			strikes = strikes,
+		})
+		runStats.dollsCleared += shiftParams.dollCount
+		if runStats.strikesThisShift == 0 then
+			runStats.perfect += 1
+		end
+		shiftNumber += 1
+		transition("ShiftResult")
+	else
+		strikes += 1
+		runStats.strikesThisShift += 1
+		ctx.services.PresenceService.surge(Config.Presence.WrongBanishSurge)
+		Remotes.get(Remotes.Names.BanishResult):FireAllClients({
+			correct = false,
+			dollId = dollId,
+			dollName = dollName,
+			strikes = strikes,
+		})
+		if strikes >= Config.Shift.StrikeLimit then
+			transition("RunEnd")
+		else
+			-- the box relocks? No: care is still done; allow retry. Re-enable deposit.
+			ctx.services.BanishService.setUnlocked(true)
+			broadcastState()
+		end
+	end
+end
+
+function ShiftManager.getParticipants(): { Player }
+	pruneParticipants()
+	return table.clone(participants)
+end
+
+function ShiftManager.getState(): string
+	return state
+end
+
+function ShiftManager.getShiftNumber(): number
+	return shiftNumber
+end
+
+function ShiftManager.getSpirit(): any
+	return spirit
+end
+
+-- ---------- debug hooks (R7) ----------
+
+function ShiftManager.debugForceState()
+	if state == "LobbyIdle" then
+		local players = Players:GetPlayers()
+		participants = table.clone(players)
+		transition("ShiftIntro")
+	elseif state == "ShiftIntro" then
+		transition("ShiftActive")
+	elseif state == "ShiftActive" then
+		transition("ShiftResult")
+	elseif state == "ShiftResult" then
+		transition("ShiftIntro")
+	elseif state == "RunEnd" then
+		transition("LobbyIdle")
+	end
+end
+
+function ShiftManager.debugSetShift(n: number)
+	shiftNumber = math.clamp(math.floor(n), 1, 99)
+	broadcastState()
+end
+
+function ShiftManager.debugReveal(): (string?, any)
+	local markedId = ctx.services.DollService.getMarkedId()
+	local markedName = if markedId then ctx.services.DollService.getDisplayName(markedId) else nil
+	local code = nil
+	if spirit then
+		local names = {}
+		for _, glyphId in spirit.code do
+			table.insert(names, Glyphs.byId[glyphId].name)
+		end
+		code = { name = spirit.name, code = table.concat(names, " → ") }
+	end
+	return markedName, code
+end
+
+function ShiftManager.debugStrike(delta: number)
+	strikes = math.max(0, strikes + delta)
+	broadcastState()
+end
+
+function ShiftManager.debugEndRun()
+	if state == "ShiftActive" or state == "ShiftIntro" then
+		transition("RunEnd")
+	end
+end
+
+local _ = TweenService -- reserved for staged beats; keep import future-proof
+
+return ShiftManager
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="35">
+          <Properties>
+            <string name="Name">TellService</string>
+            <string name="Source"><![CDATA[--!strict
+-- Tells: real tells on the marked doll, fake tells framing innocents. Generation-countered loops.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Util = require(Shared:WaitForChild("Util")) :: any
+local Tells = require(Shared:WaitForChild("Defs"):WaitForChild("Tells")) :: any
+local Draw = require(Shared:WaitForChild("Logic"):WaitForChild("Draw")) :: any
+
+local TellService = {}
+
+local ctx: any
+local generation = 0
+local stitchDoneThisShift = false
+
+function TellService.init(context: any)
+	ctx = context
+end
+
+local function pickTell(rng: any, forMarked: boolean, dollModel: Model?): string?
+	local candidates = {}
+	local WatchService = ctx.services.WatchService
+	local watched = dollModel ~= nil and WatchService.isWatched(dollModel)
+	for _, def in Tells.list do
+		local ok = true
+		if def.unwatchedOnly and watched then
+			ok = false
+		end
+		if not forMarked and not def.fakeable then
+			ok = false
+		end
+		if def.id == "StitchMark" then
+			if not forMarked or stitchDoneThisShift or ctx.services.PresenceService.getTier() < 2 then
+				ok = false
+			end
+		end
+		if ok then
+			table.insert(candidates, { id = def.id, weight = def.weight })
+		end
+	end
+	return Draw.weighted(rng, candidates)
+end
+
+function TellService.startShift(shiftParams: any, rng: any)
+	generation += 1
+	stitchDoneThisShift = false
+	local myGen = generation
+	task.spawn(function()
+		while generation == myGen do
+			local interval = shiftParams.tellIntervalMin + rng:NextNumber() * (shiftParams.tellIntervalMax - shiftParams.tellIntervalMin)
+			task.wait(interval)
+			if generation ~= myGen then
+				break
+			end
+			local DollService = ctx.services.DollService
+			-- REAL tell on the marked doll
+			local markedId = DollService.getMarkedId()
+			if markedId then
+				local model = DollService.getModel(markedId)
+				local tellId = pickTell(rng, true, model)
+				if tellId then
+					if tellId == "StitchMark" then
+						stitchDoneThisShift = true
+					end
+					Util.safeCall("realTell", function()
+						DollService.performTell(markedId, tellId)
+					end)
+				end
+			end
+			-- FAKE tell on an innocent (framing)
+			if Config.Features.FakeTells and rng:NextNumber() < shiftParams.fakeTellChance then
+				local innocents = {}
+				for _, id in DollService.getDollIds() do
+					if not DollService.isMarked(id) then
+						table.insert(innocents, id)
+					end
+				end
+				local victim = Draw.one(rng, innocents)
+				if victim then
+					-- slight delay so fake and real tells don't visibly pair up
+					task.delay(2 + rng:NextNumber() * 6, function()
+						if generation ~= myGen then
+							return
+						end
+						local model = ctx.services.DollService.getModel(victim)
+						local tellId = pickTell(rng, false, model)
+						if tellId then
+							Util.safeCall("fakeTell", function()
+								ctx.services.DollService.performTell(victim, tellId)
+							end)
+						end
+					end)
+				end
+			end
+		end
+	end)
+end
+
+function TellService.stopShift()
+	generation += 1
+end
+
+return TellService
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="36">
+          <Properties>
+            <string name="Name">WatchService</string>
+            <string name="Source"><![CDATA[--!strict
+-- Watched-check: clients stream camera CFrames; server does authoritative cone + occlusion tests.
+-- Fallback to character facing when a client has no fresh report (plan review fix).
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+
+local WatchService = {}
+
+local reports: { [Player]: { cframe: CFrame, at: number } } = {}
+local ctx: any
+
+function WatchService.init(context: any)
+	ctx = context
+	Remotes.get(Remotes.Names.CameraReport).OnServerEvent:Connect(function(player: Player, cf: any)
+		if typeof(cf) ~= "CFrame" then
+			return
+		end
+		local char = player.Character
+		local head = char and char:FindFirstChild("Head")
+		if head and head:IsA("BasePart") then
+			if (cf.Position - head.Position).Magnitude > 25 then
+				return -- stale/spoofed
+			end
+		end
+		reports[player] = { cframe = cf, at = os.clock() }
+	end)
+	Players.PlayerRemoving:Connect(function(player)
+		reports[player] = nil
+	end)
+end
+
+local function viewCFrameFor(player: Player): CFrame?
+	local rep = reports[player]
+	if rep and os.clock() - rep.at < 1 then
+		return rep.cframe
+	end
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if hrp and hrp:IsA("BasePart") then
+		return hrp.CFrame
+	end
+	return nil
+end
+
+local raycastParams = RaycastParams.new()
+raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local function seesPoint(viewCf: CFrame, point: Vector3, excludes: { Instance }): boolean
+	local offset = point - viewCf.Position
+	local dist = offset.Magnitude
+	if dist > Config.Tells.WatchMaxDistance then
+		return false
+	end
+	if dist < 1 then
+		return true
+	end
+	local cosAngle = viewCf.LookVector:Dot(offset.Unit)
+	if cosAngle < math.cos(math.rad(Config.Tells.WatchFovDegrees / 2)) then
+		return false
+	end
+	raycastParams.FilterDescendantsInstances = excludes
+	local hit = workspace:Raycast(viewCf.Position, offset, raycastParams)
+	return hit == nil
+end
+
+function WatchService.isWatched(model: Model): boolean
+	local target = model:FindFirstChild("Head") or model.PrimaryPart
+	if not (target and target:IsA("BasePart")) then
+		return false
+	end
+	local excludes: { Instance } = { model }
+	for _, player in Players:GetPlayers() do
+		if player.Character then
+			table.insert(excludes, player.Character)
+		end
+	end
+	for _, player in Players:GetPlayers() do
+		local viewCf = viewCFrameFor(player)
+		if viewCf and seesPoint(viewCf, target.Position, excludes) then
+			return true
+		end
+	end
+	return false
+end
+
+function WatchService.watchedMap(): { [string]: boolean }
+	local out: { [string]: boolean } = {}
+	local DollService = ctx.services.DollService
+	for _, dollId in DollService.getDollIds() do
+		local model = DollService.getModel(dollId)
+		out[dollId] = model ~= nil and WatchService.isWatched(model)
+	end
+	return out
+end
+
+return WatchService
+]]></string>
+          </Properties>
+        </Item>
+      </Item>
     </Item>
   </Item>
-  <Item class="SoundService" referent="22">
+  <Item class="SoundService" referent="37">
     <Properties>
       <string name="Name">SoundService</string>
       <bool name="RespectFilteringEnabled">true</bool>
     </Properties>
   </Item>
-  <Item class="StarterPlayer" referent="23">
+  <Item class="StarterPlayer" referent="38">
     <Properties>
       <string name="Name">StarterPlayer</string>
       <float name="CharacterWalkSpeed">14</float>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="24">
+    <Item class="StarterPlayerScripts" referent="39">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="25">
+      <Item class="LocalScript" referent="40">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[--!strict
--- Client bootstrap (placeholder while controllers are built; final wiring lands with M1 integration).
+-- Client bootstrap: init every controller, each pcall'd so one failure can't kill the client.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -1074,13 +4646,2206 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config")) :: any
 local Util = require(Shared:WaitForChild("Util")) :: any
 
-Util.log(("client up — v%s"):format(Config.Version))
+local Controllers = script:WaitForChild("Controllers")
+
+local ORDER = {
+	"Toast",
+	"Hud",
+	"MinigameController",
+	"NamingUI",
+	"LedgerUI",
+	"BanishConfirmUI",
+	"RecapUI",
+	"PresenceClient",
+	"HauntClient",
+	"DetectorClient",
+	"CameraReporter",
+	"PanicEmote",
+	"DebugOverlay",
+	"ErrorPanel",
+}
+
+for _, name in ORDER do
+	local module = Controllers:WaitForChild(name, 10)
+	if module and module:IsA("ModuleScript") then
+		local ok, err = pcall(function()
+			(require(module) :: any).init()
+		end)
+		if not ok then
+			Util.warn(("Controller '%s' FAILED to init: %s"):format(name, tostring(err)))
+		end
+	else
+		Util.warn(("Controller '%s' missing"):format(name))
+	end
+end
+
+Util.log(("client up — v%s (%s)"):format(Config.Version, Config.BuildStamp))
 ]]></string>
         </Properties>
+        <Item class="Folder" referent="41">
+          <Properties>
+            <string name="Name">Controllers</string>
+          </Properties>
+          <Item class="ModuleScript" referent="42">
+            <Properties>
+              <string name="Name">BanishConfirmUI</string>
+              <string name="Source"><![CDATA[--!strict
+-- The group-confirm modal: "Banish <NAME>?" with live countdown.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local SoundKit = require(Shared:WaitForChild("SoundKit")) :: any
+local Theme = require(script.Parent.Parent:WaitForChild("Theme")) :: any
+
+local BanishConfirmUI = {}
+
+local gui: ScreenGui? = nil
+local modal: Frame? = nil
+local titleLabel: TextLabel? = nil
+local countdownLabel: TextLabel? = nil
+local confirmed = false
+
+local function build()
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local g = Theme.screenGui("PorcelainBanishConfirm", 14)
+	g.Enabled = false
+	g.Parent = playerGui
+	gui = g
+
+	local m = Theme.panel(g, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.42, 0),
+		Size = UDim2.new(0, 440, 0, 230),
+		BackgroundTransparency = 0.04,
+	})
+	modal = m
+	titleLabel = Theme.label(m, {
+		Position = UDim2.new(0, 16, 0, 16),
+		Size = UDim2.new(1, -32, 0, 70),
+		Font = Theme.TitleFont,
+		TextSize = 30,
+		Text = "",
+	})
+	countdownLabel = Theme.label(m, {
+		Position = UDim2.new(0, 16, 0, 88),
+		Size = UDim2.new(1, -32, 0, 24),
+		TextSize = 16,
+		TextColor3 = Theme.Muted,
+		Text = "",
+	})
+	local confirm = Theme.button(m, {
+		Position = UDim2.new(0, 24, 1, -84),
+		Size = UDim2.new(0.5, -36, 0, 64),
+		TextSize = 24,
+		Text = "BANISH",
+	})
+	local refuse = Theme.button(m, {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -24, 1, -84),
+		Size = UDim2.new(0.5, -36, 0, 64),
+		TextSize = 24,
+		Text = "WAIT, NO",
+	})
+	confirm.Activated:Connect(function()
+		if not confirmed then
+			confirmed = true
+			SoundKit.play("UiConfirm")
+			Remotes.get(Remotes.Names.ConfirmBanish):FireServer(true)
+			confirm.Text = "WAITING…"
+		end
+	end)
+	refuse.Activated:Connect(function()
+		SoundKit.play("UiClick")
+		Remotes.get(Remotes.Names.ConfirmBanish):FireServer(false)
+	end)
+end
+
+function BanishConfirmUI.init()
+	build()
+
+	Remotes.get(Remotes.Names.BanishPrompt).OnClientEvent:Connect(function(dollId: any, dollName: any, extra: any)
+		local g = gui
+		if not g then
+			return
+		end
+		if typeof(extra) == "table" and extra.cancelled then
+			g.Enabled = false
+			confirmed = false
+			return
+		end
+		if typeof(dollId) == "string" and typeof(dollName) == "string" then
+			if not g.Enabled then
+				confirmed = false
+				local confirmButton = modal and modal:FindFirstChildOfClass("TextButton")
+				if confirmButton then
+					confirmButton.Text = "BANISH"
+				end
+			end
+			g.Enabled = true
+			if titleLabel then
+				titleLabel.Text = ("Banish %s?"):format(dollName)
+			end
+		end
+		if typeof(extra) == "table" and typeof(extra.countdown) == "number" and countdownLabel then
+			countdownLabel.Text = ("Banishing in %d… (refuse to stop it)"):format(extra.countdown)
+		end
+	end)
+
+	Remotes.get(Remotes.Names.BanishResult).OnClientEvent:Connect(function()
+		local g = gui
+		if g then
+			g.Enabled = false
+		end
+		confirmed = false
+	end)
+end
+
+return BanishConfirmUI
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="43">
+            <Properties>
+              <string name="Name">CameraReporter</string>
+              <string name="Source"><![CDATA[--!strict
+-- Streams the local camera CFrame so the server can run the watched-check (Weeping Angels rule).
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+
+local CameraReporter = {}
+
+function CameraReporter.init()
+	local remote = Remotes.get(Remotes.Names.CameraReport)
+	local interval = 1 / Config.Tells.WatchReportHz
+	local acc = 0
+	RunService.RenderStepped:Connect(function(dt: number)
+		acc += dt
+		if acc < interval then
+			return
+		end
+		acc = 0
+		local camera = workspace.CurrentCamera
+		if camera then
+			remote:FireServer(camera.CFrame)
+		end
+	end)
+end
+
+return CameraReporter
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="44">
+            <Properties>
+              <string name="Name">DebugOverlay</string>
+              <string name="Source"><![CDATA[--!strict
+-- Debug overlay (R7): presence, tier, state, watched map, marked doll. DebugMode only.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local Theme = require(script.Parent.Parent:WaitForChild("Theme")) :: any
+
+local DebugOverlay = {}
+
+function DebugOverlay.init()
+	if not Config.DebugMode then
+		return
+	end
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local gui = Theme.screenGui("PorcelainDebug", 25)
+	gui.Parent = playerGui
+	local panel = Theme.panel(gui, {
+		Position = UDim2.new(0, 8, 0.35, 0),
+		Size = UDim2.new(0, 240, 0, 10),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 0.35,
+	})
+	local text = Theme.label(panel, {
+		Position = UDim2.new(0, 8, 0, 6),
+		Size = UDim2.new(1, -16, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Font = Enum.Font.Code,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Text = "debug: waiting…",
+	})
+	local pad = Instance.new("UIPadding")
+	pad.PaddingBottom = UDim.new(0, 8)
+	pad.Parent = panel
+
+	Remotes.get(Remotes.Names.DebugInfo).OnClientEvent:Connect(function(payload: any)
+		if typeof(payload) ~= "table" then
+			return
+		end
+		local lines = {
+			("state: %s   shift: %s"):format(tostring(payload.state), tostring(payload.shift)),
+			("presence: %s  tier: %s"):format(tostring(payload.presence), tostring(payload.tier)),
+			("marked: %s"):format(tostring(payload.marked)),
+			"watched:",
+		}
+		if typeof(payload.watched) == "table" then
+			for dollId, watched in payload.watched do
+				table.insert(lines, ("  %s %s"):format(if watched then "👁" else "·", tostring(dollId)))
+			end
+		end
+		text.Text = table.concat(lines, "\n")
+	end)
+end
+
+return DebugOverlay
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="45">
+            <Properties>
+              <string name="Name">DetectorClient</string>
+              <string name="Source"><![CDATA[--!strict
+-- Spirit Compass feel: passive rattle rate + glow by distance to the nearest uncollected glyph.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local SoundKit = require(Shared:WaitForChild("SoundKit")) :: any
+
+local DetectorClient = {}
+
+local equipped: Tool? = nil
+local lastTick = 0
+
+local function watchCharacter(char: Model)
+	char.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") and child.Name == "Spirit Compass" then
+			equipped = child
+		end
+	end)
+	char.ChildRemoved:Connect(function(child)
+		if child == equipped then
+			equipped = nil
+		end
+	end)
+	local existing = char:FindFirstChild("Spirit Compass")
+	if existing and existing:IsA("Tool") then
+		equipped = existing
+	end
+end
+
+function DetectorClient.init()
+	if not Config.Features.Detector then
+		return
+	end
+	local player = Players.LocalPlayer
+	if player.Character then
+		watchCharacter(player.Character)
+	end
+	player.CharacterAdded:Connect(watchCharacter)
+
+	RunService.Heartbeat:Connect(function()
+		local tool = equipped
+		if not tool then
+			return
+		end
+		local handle = tool:FindFirstChild("Handle")
+		local targets = tool:FindFirstChild("GlyphTargets")
+		if not (handle and handle:IsA("BasePart") and targets) then
+			return
+		end
+		local best = math.huge
+		for _, value in targets:GetChildren() do
+			if value:IsA("Vector3Value") then
+				local d = (value.Value - handle.Position).Magnitude
+				best = math.min(best, d)
+			end
+		end
+		local light = handle:FindFirstChild("GlowLight")
+		if best == math.huge or best > Config.Glyphs.DetectorMaxRange then
+			if light and light:IsA("PointLight") then
+				light.Brightness = 0
+			end
+			return
+		end
+		local closeness = 1 - best / Config.Glyphs.DetectorMaxRange -- 0..1
+		if light and light:IsA("PointLight") then
+			light.Brightness = 0.2 + closeness * 3
+		end
+		-- tick rate 0.2..5 Hz by proximity
+		local rate = 0.2 + closeness * 4.8
+		local now = os.clock()
+		if now - lastTick >= 1 / rate then
+			lastTick = now
+			SoundKit.play("DetectorTick")
+		end
+	end)
+end
+
+return DetectorClient
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="46">
+            <Properties>
+              <string name="Name">ErrorPanel</string>
+              <string name="Source"><![CDATA[--!strict
+-- Error panel (R7): last 10 client errors, screenshot-friendly, toggled by a small bug button.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ScriptContext = game:GetService("ScriptContext")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Theme = require(script.Parent.Parent:WaitForChild("Theme")) :: any
+
+local ErrorPanel = {}
+
+local errors: { string } = {}
+
+function ErrorPanel.init()
+	if not Config.DebugMode then
+		return
+	end
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local gui = Theme.screenGui("PorcelainErrors", 26)
+	gui.Parent = playerGui
+
+	local panel = Theme.panel(gui, {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 8, 1, -90),
+		Size = UDim2.new(0, 420, 0, 200),
+		BackgroundTransparency = 0.15,
+		Visible = false,
+	})
+	local text = Theme.label(panel, {
+		Position = UDim2.new(0, 8, 0, 26),
+		Size = UDim2.new(1, -16, 1, -34),
+		Font = Enum.Font.Code,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		TextColor3 = Theme.Danger,
+		Text = "no client errors 🎉  (server errors: check Studio Output)",
+	})
+	Theme.label(panel, {
+		Position = UDim2.new(0, 8, 0, 4),
+		Size = UDim2.new(1, -16, 0, 20),
+		TextSize = 13,
+		TextColor3 = Theme.Muted,
+		Text = "last 10 client errors — screenshot this for bug reports",
+	})
+
+	local toggle = Theme.button(gui, {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 8, 1, -14),
+		Size = UDim2.new(0, 64, 0, 64),
+		TextSize = 26,
+		Text = "🐞",
+	})
+	toggle.Activated:Connect(function()
+		panel.Visible = not panel.Visible
+	end)
+
+	ScriptContext.Error:Connect(function(message: string, _trace: string, _source: Instance?)
+		table.insert(errors, 1, ("[%s] %s"):format(os.date("%H:%M:%S"), message))
+		while #errors > 10 do
+			table.remove(errors)
+		end
+		text.Text = table.concat(errors, "\n")
+	end)
+end
+
+return ErrorPanel
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="47">
+            <Properties>
+              <string name="Name">HauntClient</string>
+              <string name="Source"><![CDATA[--!strict
+-- Client-scope haunts: WhisperPass, the Taken stub, and the DollmakerReveal run-end scare.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local SoundKit = require(Shared:WaitForChild("SoundKit")) :: any
+local Theme = require(script.Parent.Parent:WaitForChild("Theme")) :: any
+
+local HauntClient = {}
+
+local gui: ScreenGui? = nil
+
+local function cameraShake(intensity: number, duration: number)
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	task.spawn(function()
+		local t0 = os.clock()
+		while os.clock() - t0 < duration do
+			local offset = CFrame.new(
+				(math.random() - 0.5) * intensity,
+				(math.random() - 0.5) * intensity,
+				0
+			)
+			camera.CFrame = camera.CFrame * offset
+			task.wait(0.03)
+		end
+	end)
+end
+
+local function whisperPass()
+	SoundKit.play("WhisperPass")
+	cameraShake(0.08, 0.6)
+	local g = gui
+	if not g then
+		return
+	end
+	local vignette = Instance.new("Frame")
+	vignette.BackgroundColor3 = Color3.new(0, 0, 0)
+	vignette.BackgroundTransparency = 1
+	vignette.BorderSizePixel = 0
+	vignette.Size = UDim2.new(1, 0, 1, 0)
+	vignette.Parent = g
+	TweenService:Create(vignette, TweenInfo.new(0.3), { BackgroundTransparency = 0.55 }):Play()
+	task.delay(0.8, function()
+		TweenService:Create(vignette, TweenInfo.new(1), { BackgroundTransparency = 1 }):Play()
+		task.delay(1.1, function()
+			vignette:Destroy()
+		end)
+	end)
+end
+
+local function takenStub()
+	local g = gui
+	if not g then
+		return
+	end
+	local dark = Instance.new("Frame")
+	dark.BackgroundColor3 = Color3.new(0, 0, 0)
+	dark.BackgroundTransparency = 0.2
+	dark.BorderSizePixel = 0
+	dark.Size = UDim2.new(1, 0, 1, 0)
+	dark.Parent = g
+	local label = Theme.label(dark, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.new(0.8, 0, 0, 60),
+		Font = Theme.TitleFont,
+		TextSize = 32,
+		Text = "wake up… (tap 5 times)",
+	})
+	local taps = 0
+	local button = Instance.new("TextButton")
+	button.BackgroundTransparency = 1
+	button.Size = UDim2.new(1, 0, 1, 0)
+	button.Text = ""
+	button.Parent = dark
+	button.Activated:Connect(function()
+		taps += 1
+		label.Text = ("wake up… (%d more)"):format(math.max(0, 5 - taps))
+		if taps >= 5 then
+			dark:Destroy()
+		end
+	end)
+	task.delay(20, function() -- hard auto-clear (R2)
+		if dark.Parent then
+			dark:Destroy()
+		end
+	end)
+end
+
+local function dollmakerReveal()
+	local g = gui
+	if not g then
+		return
+	end
+	local dark = Instance.new("Frame")
+	dark.BackgroundColor3 = Color3.new(0, 0, 0)
+	dark.BackgroundTransparency = 0
+	dark.BorderSizePixel = 0
+	dark.Size = UDim2.new(1, 0, 1, 0)
+	dark.ZIndex = 5
+	dark.Parent = g
+	task.delay(0.5, function()
+		SoundKit.play("DollmakerScream")
+		cameraShake(0.35, 1.2)
+		-- the towering shadow face, assembled from frames
+		local face = Instance.new("Frame")
+		face.AnchorPoint = Vector2.new(0.5, 0.5)
+		face.Position = UDim2.new(0.5, 0, 1.4, 0)
+		face.Size = UDim2.new(0, 500, 0, 620)
+		face.BackgroundTransparency = 1
+		face.ZIndex = 6
+		face.Parent = dark
+		local function facePart(pos: UDim2, size: UDim2, color: Color3, rotation: number?)
+			local frame = Instance.new("Frame")
+			frame.AnchorPoint = Vector2.new(0.5, 0.5)
+			frame.Position = pos
+			frame.Size = size
+			frame.Rotation = rotation or 0
+			frame.BackgroundColor3 = color
+			frame.BorderSizePixel = 0
+			frame.ZIndex = 6
+			frame.Parent = face
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0.5, 0)
+			corner.Parent = frame
+		end
+		local shadow = Color3.fromRGB(16, 12, 18)
+		local eye = Color3.fromRGB(212, 175, 96)
+		facePart(UDim2.fromScale(0.5, 0.5), UDim2.fromScale(0.9, 0.95), shadow) -- head mass
+		facePart(UDim2.fromScale(0.32, 0.38), UDim2.fromScale(0.16, 0.1), eye) -- left eye
+		facePart(UDim2.fromScale(0.68, 0.36), UDim2.fromScale(0.13, 0.13), eye, 12) -- right eye, wrong size
+		facePart(UDim2.fromScale(0.5, 0.68), UDim2.fromScale(0.5, 0.05), Color3.fromRGB(60, 40, 50), -6) -- stitched smile
+		for i = 1, 6 do
+			facePart(
+				UDim2.fromScale(0.28 + (i - 1) * 0.09, 0.68 + (if i % 2 == 0 then 0.03 else -0.03)),
+				UDim2.fromScale(0.02, 0.09),
+				Color3.fromRGB(60, 40, 50),
+				15
+			)
+		end
+		TweenService:Create(face, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+		}):Play()
+		task.delay(2.5, function()
+			TweenService:Create(dark, TweenInfo.new(1.5), { BackgroundTransparency = 1 }):Play()
+			for _, child in face:GetChildren() do
+				if child:IsA("Frame") then
+					TweenService:Create(child, TweenInfo.new(1), { BackgroundTransparency = 1 }):Play()
+				end
+			end
+			task.delay(1.6, function()
+				dark:Destroy()
+			end)
+		end)
+	end)
+end
+
+function HauntClient.init()
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local g = Theme.screenGui("PorcelainHaunts", 18)
+	g.Parent = playerGui
+	gui = g
+
+	Remotes.get(Remotes.Names.HauntFired).OnClientEvent:Connect(function(hauntId: any)
+		if hauntId == "WhisperPass" then
+			whisperPass()
+		elseif hauntId == "Taken" then
+			takenStub()
+		elseif hauntId == "DollmakerReveal" then
+			dollmakerReveal()
+		end
+		-- unknown ids: ignore silently
+	end)
+end
+
+return HauntClient
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="48">
+            <Properties>
+              <string name="Name">Hud</string>
+              <string name="Source"><![CDATA[--!strict
+-- HUD: shift banner, objective, strikes, doll checklist (5 listed steps only), countdown, version stamp.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local CareSteps = require(Shared:WaitForChild("Defs"):WaitForChild("CareSteps")) :: any
+local Theme = require(script.Parent.Parent:WaitForChild("Theme")) :: any
+
+local Hud = {}
+
+local shiftLabel: TextLabel? = nil
+local objectiveLabel: TextLabel? = nil
+local strikePips: { Frame } = {}
+local dollList: Frame? = nil
+local countdownLabel: TextLabel? = nil
+local dollRows: { [string]: { row: Frame, ticks: { Frame }, nameLabel: TextLabel } } = {}
+
+local function build()
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local gui = Theme.screenGui("PorcelainHud", 5)
+	gui.Parent = playerGui
+
+	-- top center: shift + objective
+	local top = Instance.new("Frame")
+	top.BackgroundTransparency = 1
+	top.AnchorPoint = Vector2.new(0.5, 0)
+	top.Position = UDim2.new(0.5, 0, 0, 12)
+	top.Size = UDim2.new(0.6, 0, 0, 100)
+	top.Parent = gui
+	shiftLabel = Theme.label(top, {
+		Size = UDim2.new(1, 0, 0, 52),
+		Font = Theme.TitleFont,
+		TextSize = 46,
+		Text = "",
+		TextStrokeTransparency = 0.5,
+	})
+	objectiveLabel = Theme.label(top, {
+		Position = UDim2.new(0, 0, 0, 52),
+		Size = UDim2.new(1, 0, 0, 30),
+		Font = Theme.BodyFont,
+		TextSize = 18,
+		TextColor3 = Theme.Muted,
+		Text = "",
+		TextStrokeTransparency = 0.6,
+	})
+
+	-- strikes under objective
+	local strikeRow = Instance.new("Frame")
+	strikeRow.BackgroundTransparency = 1
+	strikeRow.AnchorPoint = Vector2.new(0.5, 0)
+	strikeRow.Position = UDim2.new(0.5, 0, 0, 86)
+	strikeRow.Size = UDim2.new(0, 120, 0, 18)
+	strikeRow.Parent = top
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.Padding = UDim.new(0, 8)
+	layout.Parent = strikeRow
+	for _ = 1, Config.Shift.StrikeLimit do
+		local pip = Instance.new("Frame")
+		pip.Size = UDim2.new(0, 14, 0, 14)
+		pip.BackgroundColor3 = Theme.BgSoft
+		pip.BorderSizePixel = 0
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(1, 0)
+		corner.Parent = pip
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Theme.Danger
+		stroke.Transparency = 0.4
+		stroke.Parent = pip
+		pip.Parent = strikeRow
+		table.insert(strikePips, pip)
+	end
+
+	-- right side: doll checklist
+	dollList = Theme.panel(gui, {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -10, 0.5, 0),
+		Size = UDim2.new(0, 210, 0, 10),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 0.35,
+		Visible = false,
+	})
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 6)
+	listLayout.Parent = dollList
+	local listPad = Instance.new("UIPadding")
+	listPad.PaddingTop = UDim.new(0, 8)
+	listPad.PaddingBottom = UDim.new(0, 8)
+	listPad.PaddingLeft = UDim.new(0, 8)
+	listPad.PaddingRight = UDim.new(0, 8)
+	listPad.Parent = dollList
+
+	-- lobby countdown overlay
+	countdownLabel = Theme.label(gui, {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 130),
+		Size = UDim2.new(0, 400, 0, 60),
+		Font = Theme.TitleFont,
+		TextSize = 40,
+		TextColor3 = Theme.Accent,
+		Text = "",
+		TextStrokeTransparency = 0.4,
+	})
+
+	-- version stamp
+	Theme.label(gui, {
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -8, 1, -6),
+		Size = UDim2.new(0, 300, 0, 16),
+		Font = Enum.Font.Code,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		TextColor3 = Theme.Muted,
+		TextTransparency = 0.4,
+		Text = ("%s %s"):format(Config.Version, Config.BuildStamp),
+	})
+end
+
+local function addDollRow(dollId: string, name: string)
+	local list = dollList
+	if not list then
+		return
+	end
+	local row = Instance.new("Frame")
+	row.BackgroundTransparency = 1
+	row.Size = UDim2.new(1, 0, 0, 40)
+	row.Parent = list
+	local nameLabel = Theme.label(row, {
+		Size = UDim2.new(1, 0, 0, 20),
+		Font = Theme.TitleFont,
+		TextSize = 19,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Text = name,
+	})
+	local ticksRow = Instance.new("Frame")
+	ticksRow.BackgroundTransparency = 1
+	ticksRow.Position = UDim2.new(0, 0, 0, 22)
+	ticksRow.Size = UDim2.new(1, 0, 0, 14)
+	ticksRow.Parent = row
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.Padding = UDim.new(0, 6)
+	layout.Parent = ticksRow
+	local ticks = {}
+	for _ in CareSteps.list do
+		local tick = Instance.new("Frame")
+		tick.Size = UDim2.new(0, 22, 0, 10)
+		tick.BackgroundColor3 = Theme.BgSoft
+		tick.BorderSizePixel = 0
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 3)
+		corner.Parent = tick
+		tick.Parent = ticksRow
+		table.insert(ticks, tick)
+	end
+	dollRows[dollId] = { row = row, ticks = ticks, nameLabel = nameLabel }
+end
+
+function Hud.init()
+	build()
+
+	Remotes.get(Remotes.Names.StateChanged).OnClientEvent:Connect(function(state: any, data: any)
+		if typeof(data) ~= "table" then
+			return
+		end
+		if shiftLabel then
+			shiftLabel.Text = if state == "LobbyIdle" then "THE DOLLMAKER'S" else ("SHIFT %d"):format(data.shift or 1)
+		end
+		if objectiveLabel then
+			objectiveLabel.Text = data.objective or ""
+		end
+		for i, pip in strikePips do
+			pip.BackgroundColor3 = if i <= (data.strikes or 0) then Theme.Danger else Theme.BgSoft
+		end
+		if dollList and (state == "LobbyIdle" or state == "RunEnd") then
+			dollList.Visible = false
+			for _, entry in dollRows do
+				entry.row:Destroy()
+			end
+			dollRows = {}
+		end
+	end)
+
+	Remotes.get(Remotes.Names.ShiftData).OnClientEvent:Connect(function(data: any)
+		if typeof(data) ~= "table" or typeof(data.dolls) ~= "table" then
+			return
+		end
+		for _, entry in dollRows do
+			entry.row:Destroy()
+		end
+		dollRows = {}
+		if dollList then
+			dollList.Visible = true
+		end
+		for _, doll in data.dolls do
+			addDollRow(doll.id, doll.name)
+		end
+	end)
+
+	Remotes.get(Remotes.Names.DollUpdate).OnClientEvent:Connect(function(dollId: any, update: any)
+		local entry = dollRows[dollId]
+		if not entry or typeof(update) ~= "table" then
+			return
+		end
+		if typeof(update.name) == "string" then
+			entry.nameLabel.Text = update.name
+		end
+		if typeof(update.careDone) == "table" then
+			local doneSet: { [string]: boolean } = {}
+			for _, stepId in update.careDone do
+				doneSet[stepId] = true
+			end
+			for i, step in CareSteps.list do
+				if doneSet[step.id] and entry.ticks[i] then
+					entry.ticks[i].BackgroundColor3 = Theme.Gold
+				end
+			end
+		end
+		if update.done == true then
+			entry.nameLabel.TextColor3 = Theme.Gold
+		end
+	end)
+
+	Remotes.get(Remotes.Names.ReadyCountdown).OnClientEvent:Connect(function(seconds: any)
+		if countdownLabel then
+			countdownLabel.Text = if typeof(seconds) == "number" then ("The shift begins in %d…"):format(seconds) else ""
+		end
+	end)
+end
+
+return Hud
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="49">
+            <Properties>
+              <string name="Name">LedgerUI</string>
+              <string name="Source"><![CDATA[--!strict
+-- The Dollmaker's ledger: spirits + codes on the left, shared slots + found tray on the right.
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local Glyphs = require(Shared:WaitForChild("Defs"):WaitForChild("Glyphs")) :: any
+local Spirits = require(Shared:WaitForChild("Defs"):WaitForChild("Spirits")) :: any
+local GlyphMatch = require(Shared:WaitForChild("Logic"):WaitForChild("GlyphMatch")) :: any
+local GlyphRender = require(Shared:WaitForChild("GlyphRender")) :: any
+local SoundKit = require(Shared:WaitForChild("SoundKit")) :: any
+local Theme = require(script.Parent.Parent:WaitForChild("Theme")) :: any
+
+local LedgerUI = {}
+
+local gui: ScreenGui? = nil
+local slotFrames: { Frame } = {}
+local trayFrame: Frame? = nil
+local matchBanner: TextLabel? = nil
+local found: { string } = {}
+local slots: { [number]: string? } = {}
+local selectedGlyph: string? = nil
+
+local function glyphButton(parent: Instance, glyphId: string, size: number, onTap: (() -> ())?): TextButton
+	local button = Theme.button(parent, {
+		Size = UDim2.new(0, size, 0, size),
+		Text = "",
+	})
+	local canvas = Instance.new("Frame")
+	canvas.BackgroundTransparency = 1
+	canvas.Size = UDim2.new(1, -10, 1, -10)
+	canvas.Position = UDim2.new(0, 5, 0, 5)
+	canvas.Parent = button
+	GlyphRender.render(glyphId, canvas)
+	if onTap then
+		button.Activated:Connect(onTap)
+	end
+	return button
+end
+
+local function refreshSlots()
+	for i, frame in slotFrames do
+		for _, child in frame:GetChildren() do
+			if child:IsA("Frame") or child:IsA("TextLabel") then
+				child:Destroy()
+			end
+		end
+		local glyphId = slots[i]
+		if glyphId then
+			local canvas = Instance.new("Frame")
+			canvas.BackgroundTransparency = 1
+			canvas.Size = UDim2.new(1, -10, 1, -10)
+			canvas.Position = UDim2.new(0, 5, 0, 5)
+			canvas.Parent = frame
+			GlyphRender.render(glyphId, canvas, Theme.Gold)
+		else
+			Theme.label(frame, {
+				Size = UDim2.new(1, 0, 1, 0),
+				Font = Theme.TitleFont,
+				TextSize = 30,
+				TextColor3 = Theme.Muted,
+				TextTransparency = 0.5,
+				Text = tostring(i),
+			})
+		end
+	end
+	-- client-side match feedback (server stays authoritative)
+	if matchBanner then
+		local spiritId = GlyphMatch.identify(Spirits.list, slots)
+		if spiritId then
+			local spirit = Spirits.byId[spiritId]
+			matchBanner.Text = ("MATCHED: %s"):format(spirit.name)
+			matchBanner.TextColor3 = Theme.Gold
+		else
+			matchBanner.Text = "no match yet…"
+			matchBanner.TextColor3 = Theme.Muted
+		end
+	end
+end
+
+local function refreshTray()
+	local tray = trayFrame
+	if not tray then
+		return
+	end
+	for _, child in tray:GetChildren() do
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+	end
+	for _, glyphId in found do
+		local button = glyphButton(tray, glyphId, 62, function()
+			selectedGlyph = glyphId
+			SoundKit.play("UiClick")
+		end)
+		local _ = button
+	end
+end
+
+local function buildBook()
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local g = Theme.screenGui("PorcelainLedger", 12)
+	g.Enabled = false
+	g.Parent = playerGui
+	gui = g
+
+	local b = Theme.panel(g, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.new(0, 760, 0, 460),
+		BackgroundTransparency = 0.03,
+	})
+
+	Theme.label(b, {
+		Position = UDim2.new(0, 0, 0, 8),
+		Size = UDim2.new(1, 0, 0, 34),
+		Font = Theme.TitleFont,
+		TextSize = 28,
+		Text = "— The Spirit Ledger —",
+	})
+
+	local close = Theme.button(b, {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -8, 0, 8),
+		Size = UDim2.new(0, 40, 0, 34),
+		TextSize = 20,
+		Text = "✕",
+	})
+	close.Activated:Connect(function()
+		g.Enabled = false
+	end)
+
+	-- left page: spirits
+	local left = Instance.new("ScrollingFrame")
+	left.BackgroundTransparency = 1
+	left.Position = UDim2.new(0, 14, 0, 50)
+	left.Size = UDim2.new(0.5, -20, 1, -64)
+	left.CanvasSize = UDim2.new(0, 0, 0, 0)
+	left.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	left.ScrollBarThickness = 4
+	left.Parent = b
+	local leftLayout = Instance.new("UIListLayout")
+	leftLayout.Padding = UDim.new(0, 8)
+	leftLayout.Parent = left
+	for _, spirit in Spirits.list do
+		local entry = Instance.new("Frame")
+		entry.BackgroundTransparency = 1
+		entry.Size = UDim2.new(1, -8, 0, 88)
+		entry.Parent = left
+		Theme.label(entry, {
+			Size = UDim2.new(1, 0, 0, 22),
+			Font = Theme.TitleFont,
+			TextSize = 21,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Text = spirit.name,
+		})
+		local codeRow = Instance.new("Frame")
+		codeRow.BackgroundTransparency = 1
+		codeRow.Position = UDim2.new(0, 0, 0, 24)
+		codeRow.Size = UDim2.new(1, 0, 0, 34)
+		codeRow.Parent = entry
+		local rowLayout = Instance.new("UIListLayout")
+		rowLayout.FillDirection = Enum.FillDirection.Horizontal
+		rowLayout.Padding = UDim.new(0, 8)
+		rowLayout.Parent = codeRow
+		for _, glyphId in spirit.code do
+			local cell = Instance.new("Frame")
+			cell.Size = UDim2.new(0, 32, 0, 32)
+			cell.BackgroundColor3 = Theme.BgSoft
+			cell.BorderSizePixel = 0
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, 6)
+			corner.Parent = cell
+			cell.Parent = codeRow
+			local canvas = Instance.new("Frame")
+			canvas.BackgroundTransparency = 1
+			canvas.Size = UDim2.new(1, -6, 1, -6)
+			canvas.Position = UDim2.new(0, 3, 0, 3)
+			canvas.Parent = cell
+			GlyphRender.render(glyphId, canvas)
+		end
+		Theme.label(entry, {
+			Position = UDim2.new(0, 0, 0, 60),
+			Size = UDim2.new(1, 0, 0, 26),
+			TextSize = 13,
+			TextColor3 = Theme.Muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Text = spirit.flavor,
+		})
+	end
+
+	-- right page: slots + tray
+	local right = Instance.new("Frame")
+	right.BackgroundTransparency = 1
+	right.Position = UDim2.new(0.5, 8, 0, 50)
+	right.Size = UDim2.new(0.5, -22, 1, -64)
+	right.Parent = b
+	Theme.label(right, {
+		Size = UDim2.new(1, 0, 0, 22),
+		TextSize = 15,
+		TextColor3 = Theme.Muted,
+		Text = "Tap a found glyph, then tap a slot. Order matters.",
+	})
+	local slotRow = Instance.new("Frame")
+	slotRow.BackgroundTransparency = 1
+	slotRow.Position = UDim2.new(0, 0, 0, 30)
+	slotRow.Size = UDim2.new(1, 0, 0, 92)
+	slotRow.Parent = right
+	local slotLayout = Instance.new("UIListLayout")
+	slotLayout.FillDirection = Enum.FillDirection.Horizontal
+	slotLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	slotLayout.Padding = UDim.new(0, 12)
+	slotLayout.Parent = slotRow
+	for i = 1, 3 do
+		local slot = Instance.new("Frame")
+		slot.Size = UDim2.new(0, 84, 0, 84)
+		slot.BackgroundColor3 = Theme.BgSoft
+		slot.BorderSizePixel = 0
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 10)
+		corner.Parent = slot
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Theme.Accent
+		stroke.Transparency = 0.5
+		stroke.Parent = slot
+		slot.Parent = slotRow
+		table.insert(slotFrames, slot)
+		local button = Instance.new("TextButton")
+		button.BackgroundTransparency = 1
+		button.Size = UDim2.new(1, 0, 1, 0)
+		button.Text = ""
+		button.ZIndex = 5
+		button.Parent = slot
+		button.Activated:Connect(function()
+			if selectedGlyph then
+				Remotes.get(Remotes.Names.SlotGlyph):FireServer(i, selectedGlyph)
+				selectedGlyph = nil
+			elseif slots[i] then
+				Remotes.get(Remotes.Names.SlotGlyph):FireServer(i, nil)
+			end
+		end)
+	end
+
+	matchBanner = Theme.label(right, {
+		Position = UDim2.new(0, 0, 0, 128),
+		Size = UDim2.new(1, 0, 0, 26),
+		Font = Theme.TitleFont,
+		TextSize = 22,
+		Text = "no match yet…",
+		TextColor3 = Theme.Muted,
+	})
+
+	Theme.label(right, {
+		Position = UDim2.new(0, 0, 0, 160),
+		Size = UDim2.new(1, 0, 0, 20),
+		TextSize = 14,
+		TextColor3 = Theme.Muted,
+		Text = "Found glyphs:",
+	})
+	local tray = Instance.new("Frame")
+	tray.BackgroundTransparency = 1
+	tray.Position = UDim2.new(0, 0, 0, 184)
+	tray.Size = UDim2.new(1, 0, 1, -184)
+	tray.Parent = right
+	local trayLayout = Instance.new("UIGridLayout")
+	trayLayout.CellSize = UDim2.new(0, 62, 0, 62)
+	trayLayout.CellPadding = UDim2.new(0, 8, 0, 8)
+	trayLayout.Parent = tray
+	trayFrame = tray
+
+	refreshSlots()
+end
+
+function LedgerUI.init()
+	buildBook()
+
+	ProximityPromptService.PromptTriggered:Connect(function(prompt: ProximityPrompt, player: Player)
+		if player ~= Players.LocalPlayer then
+			return
+		end
+		local parent = prompt.Parent
+		local desk = parent and parent:FindFirstAncestorOfClass("Model")
+		-- the ledger prompt sits on the book part; identify by tag on the desk or the prompt's ObjectText
+		if prompt.ObjectText == "Spirit Ledger" and gui then
+			gui.Enabled = true
+		end
+		local _ = desk
+		local _2 = CollectionService
+	end)
+
+	Remotes.get(Remotes.Names.GlyphFound).OnClientEvent:Connect(function(_glyphId: any, data: any)
+		if typeof(data) ~= "table" then
+			return
+		end
+		if typeof(data.found) == "table" then
+			found = data.found
+		end
+		if typeof(data.slots) == "table" then
+			slots = {}
+			for i = 1, 3 do
+				local v = data.slots[i]
+				slots[i] = if typeof(v) == "string" then v else nil
+			end
+		end
+		refreshTray()
+		refreshSlots()
+	end)
+
+	-- close the book when a shift ends
+	Remotes.get(Remotes.Names.StateChanged).OnClientEvent:Connect(function(state: any)
+		if (state == "LobbyIdle" or state == "RunEnd") and gui then
+			gui.Enabled = false
+		end
+	end)
+end
+
+local _ = Glyphs -- glyph defs consumed via GlyphRender
+
+return LedgerUI
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="50">
+            <Properties>
+              <string name="Name">MinigameController</string>
+              <string name="Source"><![CDATA[--!strict
+-- The four care minigames. Touch-first, bottom-anchored, driven by MinigameStart/Done/Cancel.
+-- Failure inside the lock window just retries — TIME is the cost (Presence keeps filling).
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local CareSteps = require(Shared:WaitForChild("Defs"):WaitForChild("CareSteps")) :: any
+local SoundKit = require(Shared:WaitForChild("SoundKit")) :: any
+local Theme = require(script.Parent.Parent:WaitForChild("Theme")) :: any
+
+local MinigameController = {}
+
+local gui: ScreenGui? = nil
+local activePanel: Frame? = nil
+local activeKey: string? = nil -- dollId..stepId
+local heartbeat: RBXScriptConnection? = nil
+
+local function closePanel()
+	if heartbeat then
+		heartbeat:Disconnect()
+		heartbeat = nil
+	end
+	if activePanel then
+		activePanel:Destroy()
+		activePanel = nil
+	end
+	activeKey = nil
+end
+
+local function finish(dollId: string, stepId: string, success: boolean)
+	if activeKey ~= dollId .. stepId then
+		return
+	end
+	if success then
+		SoundKit.play("StepDone")
+	end
+	Remotes.get(Remotes.Names.MinigameDone):FireServer(dollId, stepId, success)
+	closePanel()
+end
+
+local function makePanel(title: string, subtitle: string): (Frame, Frame)
+	local g = gui
+	assert(g, "gui missing")
+	local panel = Theme.panel(g, {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -30),
+		Size = UDim2.new(0, 480, 0, 300),
+		BackgroundTransparency = 0.06,
+	})
+	Theme.label(panel, {
+		Position = UDim2.new(0, 0, 0, 10),
+		Size = UDim2.new(1, 0, 0, 34),
+		Font = Theme.TitleFont,
+		TextSize = 28,
+		Text = title,
+	})
+	Theme.label(panel, {
+		Position = UDim2.new(0, 0, 0, 44),
+		Size = UDim2.new(1, 0, 0, 20),
+		TextSize = 15,
+		TextColor3 = Theme.Muted,
+		Text = subtitle,
+	})
+	local arena = Instance.new("Frame")
+	arena.BackgroundTransparency = 1
+	arena.Position = UDim2.new(0, 16, 0, 70)
+	arena.Size = UDim2.new(1, -32, 1, -86)
+	arena.Parent = panel
+	activePanel = panel
+	return panel, arena
+end
+
+local function progressBar(panel: Frame): (Frame, (n: number) -> ())
+	local barBg = Instance.new("Frame")
+	barBg.AnchorPoint = Vector2.new(0.5, 1)
+	barBg.Position = UDim2.new(0.5, 0, 1, -8)
+	barBg.Size = UDim2.new(1, -32, 0, 10)
+	barBg.BackgroundColor3 = Theme.BgSoft
+	barBg.BorderSizePixel = 0
+	barBg.Parent = panel
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(1, 0)
+	corner.Parent = barBg
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.new(0, 0, 1, 0)
+	fill.BackgroundColor3 = Theme.Gold
+	fill.BorderSizePixel = 0
+	fill.Parent = barBg
+	local fc = Instance.new("UICorner")
+	fc.CornerRadius = UDim.new(1, 0)
+	fc.Parent = fill
+	return barBg, function(n: number)
+		fill.Size = UDim2.new(math.clamp(n, 0, 1), 0, 1, 0)
+	end
+end
+
+-- ---------- minigames ----------
+
+local function mashGame(dollId: string, stepId: string)
+	local panel, arena = makePanel("Brush the Hair", "Tap the brush — smooth every tangle!")
+	local _, setProgress = progressBar(panel)
+	local progress = 0
+	local button = Theme.button(arena, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.new(0, 160, 0, 120),
+		TextSize = 40,
+		Text = "🪮",
+	})
+	button.Activated:Connect(function()
+		SoundKit.play("BrushStroke")
+		progress += 0.09
+		setProgress(progress)
+		button.Rotation = (math.random() - 0.5) * 20
+		if progress >= 1 then
+			finish(dollId, stepId, true)
+		end
+	end)
+end
+
+local function holdGame(dollId: string, stepId: string, title: string, subtitle: string)
+	local panel, arena = makePanel(title, subtitle)
+	local _, setProgress = progressBar(panel)
+	local progress = 0
+	local holding = false
+	local circle = Theme.button(arena, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.new(0, 130, 0, 130),
+		TextSize = 20,
+		Text = "HOLD",
+	})
+	local corner = circle:FindFirstChildOfClass("UICorner")
+	if corner then
+		corner.CornerRadius = UDim.new(1, 0)
+	end
+	circle.MouseButton1Down:Connect(function()
+		holding = true
+	end)
+	circle.MouseButton1Up:Connect(function()
+		holding = false
+	end)
+	local t = 0
+	heartbeat = RunService.Heartbeat:Connect(function(dt: number)
+		t += dt
+		-- circle drifts slowly; player must keep the press
+		circle.Position = UDim2.new(0.5 + math.sin(t * 0.7) * 0.22, 0, 0.5 + math.cos(t * 0.9) * 0.14, 0)
+		if holding then
+			progress += dt / 4
+			setProgress(progress)
+			if progress >= 1 then
+				finish(dollId, stepId, true)
+			end
+		end
+	end)
+end
+
+local function sequenceGame(dollId: string, stepId: string, seed: number)
+	local panel, arena = makePanel("Paint the Face", "Tap the paint dots IN ORDER — 1, 2, 3, 4, 5.")
+	local _, setProgress = progressBar(panel)
+	local rng = Random.new(seed)
+	local expected = 1
+	for i = 1, 5 do
+		local dot = Theme.button(arena, {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.12 + rng:NextNumber() * 0.76, 0, 0.15 + rng:NextNumber() * 0.7, 0),
+			Size = UDim2.new(0, 64, 0, 64),
+			TextSize = 26,
+			Text = tostring(i),
+		})
+		local corner = dot:FindFirstChildOfClass("UICorner")
+		if corner then
+			corner.CornerRadius = UDim.new(1, 0)
+		end
+		dot.Activated:Connect(function()
+			if i == expected then
+				expected += 1
+				dot.Visible = false
+				setProgress((expected - 1) / 5)
+				SoundKit.play("UiClick")
+				if expected > 5 then
+					finish(dollId, stepId, true)
+				end
+			else
+				-- wrong tap: reset order (retry within the lock window)
+				expected = 1
+				setProgress(0)
+				for _, child in arena:GetChildren() do
+					if child:IsA("TextButton") then
+						child.Visible = true
+					end
+				end
+			end
+		end)
+	end
+	local _ = panel
+end
+
+local function timingGame(dollId: string, stepId: string)
+	local panel, arena = makePanel("Button the Coat", "Tap when the needle is in the GOLD zone. 3 buttons.")
+	local _, setProgress = progressBar(panel)
+	local hits = 0
+	local zoneWidth = 0.3
+	local track = Instance.new("Frame")
+	track.AnchorPoint = Vector2.new(0.5, 0.5)
+	track.Position = UDim2.new(0.5, 0, 0.35, 0)
+	track.Size = UDim2.new(0.9, 0, 0, 22)
+	track.BackgroundColor3 = Theme.BgSoft
+	track.BorderSizePixel = 0
+	track.Parent = arena
+	local zone = Instance.new("Frame")
+	zone.BackgroundColor3 = Theme.Gold
+	zone.BackgroundTransparency = 0.4
+	zone.BorderSizePixel = 0
+	zone.Parent = track
+	local needle = Instance.new("Frame")
+	needle.Size = UDim2.new(0, 4, 1.6, 0)
+	needle.AnchorPoint = Vector2.new(0.5, 0.2)
+	needle.BackgroundColor3 = Theme.Parchment
+	needle.BorderSizePixel = 0
+	needle.Parent = track
+	local function rollZone()
+		zone.Size = UDim2.new(zoneWidth, 0, 1, 0)
+		zone.Position = UDim2.new(math.random() * (1 - zoneWidth), 0, 0, 0)
+	end
+	rollZone()
+	local t = 0
+	heartbeat = RunService.Heartbeat:Connect(function(dt: number)
+		t += dt
+		local x = (math.sin(t * 2.2) + 1) / 2
+		needle.Position = UDim2.new(x, 0, 0, 0)
+	end)
+	local tapButton = Theme.button(arena, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.75, 0),
+		Size = UDim2.new(0, 180, 0, 70),
+		TextSize = 24,
+		Text = "BUTTON IT",
+	})
+	tapButton.Activated:Connect(function()
+		local x = needle.Position.X.Scale
+		local z0 = zone.Position.X.Scale
+		if x >= z0 and x <= z0 + zoneWidth then
+			hits += 1
+			setProgress(hits / 3)
+			SoundKit.play("UiConfirm")
+			zoneWidth = math.max(0.12, zoneWidth - 0.08)
+			rollZone()
+			if hits >= 3 then
+				finish(dollId, stepId, true)
+			end
+		end
+	end)
+end
+
+-- ---------- wiring ----------
+
+function MinigameController.init()
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local g = Theme.screenGui("PorcelainMinigames", 10)
+	g.Parent = playerGui
+	gui = g
+
+	Remotes.get(Remotes.Names.MinigameStart).OnClientEvent:Connect(function(dollId: any, stepId: any, seed: any)
+		if typeof(dollId) ~= "string" or typeof(stepId) ~= "string" then
+			return
+		end
+		closePanel()
+		activeKey = dollId .. stepId
+		local step = CareSteps.byId[stepId]
+		local kind = step and step.minigame or "mash"
+		if kind == "mash" then
+			mashGame(dollId, stepId)
+		elseif kind == "hold" then
+			if stepId == "Eyes" then
+				holdGame(dollId, stepId, "Polish the Eyes", "Hold the cloth steady — follow it as it drifts.")
+			else
+				holdGame(dollId, stepId, "Wind the Music Box", "Hold the crank — don't let go until it sings.")
+			end
+		elseif kind == "sequence" then
+			sequenceGame(dollId, stepId, if typeof(seed) == "number" then seed else 1)
+		elseif kind == "timing" then
+			timingGame(dollId, stepId)
+		end
+		-- client-side watchdog mirror (R2): close a bit after the server lock expires
+		task.delay(Config.Care.MinigameSeconds + 2, function()
+			if activeKey == dollId .. stepId then
+				closePanel()
+			end
+		end)
+	end)
+
+	Remotes.get(Remotes.Names.MinigameCancel).OnClientEvent:Connect(function(dollId: any, stepId: any)
+		if typeof(dollId) == "string" and typeof(stepId) == "string" and activeKey == dollId .. stepId then
+			closePanel()
+		end
+	end)
+end
+
+return MinigameController
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="51">
+            <Properties>
+              <string name="Name">NamingUI</string>
+              <string name="Source"><![CDATA[--!strict
+-- Doll naming: compact top-half picker, once per doll, on the local player's first completed step.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local DollNames = require(Shared:WaitForChild("Defs"):WaitForChild("DollNames")) :: any
+local SoundKit = require(Shared:WaitForChild("SoundKit")) :: any
+local Theme = require(script.Parent.Parent:WaitForChild("Theme")) :: any
+
+local NamingUI = {}
+
+local gui: ScreenGui? = nil
+local panel: Frame? = nil
+local offeredFor: { [string]: boolean } = {}
+local currentDollId: string? = nil
+
+local function close()
+	if panel then
+		panel:Destroy()
+		panel = nil
+	end
+	currentDollId = nil
+end
+
+local function offer(dollId: string)
+	if panel then
+		return
+	end
+	currentDollId = dollId
+	local g = gui
+	assert(g)
+	local p = Theme.panel(g, {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 120),
+		Size = UDim2.new(0, 460, 0, 220),
+		BackgroundTransparency = 0.06,
+	})
+	panel = p
+	Theme.label(p, {
+		Position = UDim2.new(0, 0, 0, 10),
+		Size = UDim2.new(1, 0, 0, 28),
+		Font = Theme.TitleFont,
+		TextSize = 24,
+		Text = "Name this doll?",
+	})
+	local grid = Instance.new("Frame")
+	grid.BackgroundTransparency = 1
+	grid.Position = UDim2.new(0, 14, 0, 46)
+	grid.Size = UDim2.new(1, -28, 0, 118)
+	grid.Parent = p
+	local layout = Instance.new("UIGridLayout")
+	layout.CellSize = UDim2.new(0.333, -8, 0, 52)
+	layout.CellPadding = UDim2.new(0, 8, 0, 8)
+	layout.Parent = grid
+
+	local function fillNames()
+		for _, child in grid:GetChildren() do
+			if child:IsA("TextButton") then
+				child:Destroy()
+			end
+		end
+		local picked: { [number]: boolean } = {}
+		while true do
+			local count = 0
+			for _ in picked do
+				count += 1
+			end
+			if count >= 6 then
+				break
+			end
+			picked[math.random(1, #DollNames)] = true
+		end
+		for index in picked do
+			local button = Theme.button(grid, {
+				TextSize = 18,
+				Text = DollNames[index],
+			})
+			button.Activated:Connect(function()
+				local id = currentDollId
+				if id then
+					SoundKit.play("UiConfirm")
+					Remotes.get(Remotes.Names.ChooseName):FireServer(id, index)
+				end
+				close()
+			end)
+		end
+	end
+	fillNames()
+
+	local shuffle = Theme.button(p, {
+		Position = UDim2.new(0, 14, 1, -46),
+		Size = UDim2.new(0.5, -22, 0, 36),
+		TextSize = 17,
+		Text = "↻ other names",
+	})
+	shuffle.Activated:Connect(fillNames)
+	local skip = Theme.button(p, {
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -14, 1, -46),
+		Size = UDim2.new(0.5, -22, 0, 36),
+		TextSize = 17,
+		Text = "keep current name",
+	})
+	skip.Activated:Connect(close)
+
+	-- never block the loop: auto-dismiss (R2)
+	task.delay(15, function()
+		if currentDollId == dollId then
+			close()
+		end
+	end)
+end
+
+function NamingUI.init()
+	if not Config.Features.Naming then
+		return
+	end
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local g = Theme.screenGui("PorcelainNaming", 11)
+	g.Parent = playerGui
+	gui = g
+
+	-- offer naming when the local player finishes their first minigame on a doll:
+	-- MinigameStart implies this player is working that doll; offer after the step completes (DollUpdate).
+	local workingDoll: string? = nil
+	Remotes.get(Remotes.Names.MinigameStart).OnClientEvent:Connect(function(dollId: any)
+		if typeof(dollId) == "string" then
+			workingDoll = dollId
+		end
+	end)
+	Remotes.get(Remotes.Names.DollUpdate).OnClientEvent:Connect(function(dollId: any, update: any)
+		if typeof(dollId) ~= "string" or typeof(update) ~= "table" then
+			return
+		end
+		if update.careDone and dollId == workingDoll and not offeredFor[dollId] then
+			offeredFor[dollId] = true
+			offer(dollId)
+		end
+	end)
+	Remotes.get(Remotes.Names.StateChanged).OnClientEvent:Connect(function(state: any)
+		if state == "LobbyIdle" or state == "RunEnd" then
+			offeredFor = {}
+			close()
+		end
+	end)
+end
+
+return NamingUI
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="52">
+            <Properties>
+              <string name="Name">PanicEmote</string>
+              <string name="Source"><![CDATA[--!strict
+-- Panic emote: corner button + E key. The characters scream so the players don't have to.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
+local SoundKit = require(Shared:WaitForChild("SoundKit")) :: any
+local Theme = require(script.Parent.Parent:WaitForChild("Theme")) :: any
+
+local PanicEmote = {}
+
+local cooldownUntil = 0
+
+local function panic()
+	local now = os.clock()
+	if now < cooldownUntil then
+		return
+	end
+	cooldownUntil = now + 3
+	local player = Players.LocalPlayer
+	local char = player.Character
+	local head = char and char:FindFirstChild("Head")
+	SoundKit.play("PanicBark", head)
+	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.Jump = true
+	end
+	-- local "!!" billboard (local-only stub for the beta)
+	if head and head:IsA("BasePart") then
+		local billboard = Instance.new("BillboardGui")
+		billboard.Adornee = head
+		billboard.Size = UDim2.new(0, 60, 0, 40)
+		billboard.StudsOffset = Vector3.new(0, 3.4, 0)
+		billboard.AlwaysOnTop = true
+		billboard.Parent = head
+		local label = Instance.new("TextLabel")
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.fromScale(1, 1)
+		label.Font = Enum.Font.GothamBold
+		label.TextScaled = true
+		label.TextColor3 = Theme.Danger
+		label.Text = "!!"
+		label.Parent = billboard
+		task.delay(2, function()
+			billboard:Destroy()
+		end)
+	end
+	-- tiny camera pop
+	local camera = workspace.CurrentCamera
+	if camera then
+		task.spawn(function()
+			for _ = 1, 6 do
+				camera.CFrame = camera.CFrame * CFrame.new((math.random() - 0.5) * 0.15, (math.random() - 0.5) * 0.15, 0)
+				task.wait(0.03)
+			end
+		end)
+	end
+end
+
+function PanicEmote.init()
+	if not Config.Features.PanicEmote then
+		return
+	end
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local gui = Theme.screenGui("PorcelainPanic", 8)
+	gui.Parent = playerGui
+	local button = Theme.button(gui, {
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -14, 1, -90),
+		Size = UDim2.new(0, 68, 0, 68),
+		TextSize = 30,
+		Text = "😱",
+	})
+	local corner = button:FindFirstChildOfClass("UICorner")
+	if corner then
+		corner.CornerRadius = UDim.new(1, 0)
+	end
+	button.Activated:Connect(panic)
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if not processed and input.KeyCode == Enum.KeyCode.E then
+			panic()
+		end
+	end)
+end
+
+return PanicEmote
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="53">
+            <Properties>
+              <string name="Name">PresenceClient</string>
+              <string name="Source"><![CDATA[--!strict
+-- Diegetic Presence rendering: LOCAL lighting shifts + lamp flicker + ambience layers by tier.
+
+local Lighting = game:GetService("Lighting")
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local SoundKit = require(Shared:WaitForChild("SoundKit")) :: any
+
+local PresenceClient = {}
+
+local tier = 0
+local ambienceBase: Sound? = nil
+local ambienceT2: Sound? = nil
+local ambienceT3: Sound? = nil
+
+local TIER_AMBIENT = {
+	[0] = Color3.fromRGB(27, 23, 31),
+	[1] = Color3.fromRGB(24, 20, 30),
+	[2] = Color3.fromRGB(20, 22, 24),
+	[3] = Color3.fromRGB(16, 24, 18),
+}
+
+local function applyTier()
+	local target = TIER_AMBIENT[tier] or TIER_AMBIENT[0]
+	TweenService:Create(Lighting, TweenInfo.new(3), {
+		Ambient = target,
+		OutdoorAmbient = target,
+	}):Play()
+	local function setVolume(sound: Sound?, on: boolean, volume: number)
+		if sound then
+			TweenService:Create(sound, TweenInfo.new(2), { Volume = if on then volume else 0 }):Play()
+		end
+	end
+	setVolume(ambienceT2, tier >= 2, 0.3)
+	setVolume(ambienceT3, tier >= 3, 0.35)
+end
+
+local function flickerLoop()
+	task.spawn(function()
+		while true do
+			local interval = if tier >= 3 then 0.8 elseif tier == 2 then 2 elseif tier == 1 then 5 else 12
+			task.wait(interval + math.random() * interval)
+			if tier < 1 then
+				continue
+			end
+			-- flicker a random lamp locally
+			local lamps = CollectionService:GetTagged("Lamp")
+			if #lamps == 0 then
+				continue
+			end
+			local lamp = lamps[math.random(1, #lamps)]
+			local light = lamp:FindFirstChildOfClass("PointLight")
+			if light and light.Enabled then
+				task.spawn(function()
+					for _ = 1, math.random(2, 5) do
+						light.Brightness = 0.2
+						task.wait(0.05 + math.random() * 0.08)
+						light.Brightness = 1.4
+						task.wait(0.05 + math.random() * 0.1)
+					end
+				end)
+			end
+		end
+	end)
+end
+
+function PresenceClient.init()
+	ambienceBase = SoundKit.attach("AmbienceBase", SoundService)
+	ambienceT2 = SoundKit.attach("AmbienceTier2", SoundService)
+	ambienceT3 = SoundKit.attach("AmbienceTier3", SoundService)
+	for _, sound in { ambienceBase, ambienceT2, ambienceT3 } do
+		if sound then
+			sound.Volume = if sound == ambienceBase then sound.Volume else 0
+			sound:Play()
+		end
+	end
+
+	Remotes.get(Remotes.Names.PresenceTier).OnClientEvent:Connect(function(newTier: any)
+		if typeof(newTier) == "number" then
+			tier = newTier
+			applyTier()
+		end
+	end)
+
+	flickerLoop()
+end
+
+return PresenceClient
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="54">
+            <Properties>
+              <string name="Name">RecapUI</string>
+              <string name="Source"><![CDATA[--!strict
+-- The staged banish-reveal beat + the end-of-run recap card.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local SoundKit = require(Shared:WaitForChild("SoundKit")) :: any
+local Theme = require(script.Parent.Parent:WaitForChild("Theme")) :: any
+
+local RecapUI = {}
+
+local gui: ScreenGui? = nil
+
+local function black(transparency: number): Frame
+	local g = gui
+	assert(g)
+	local frame = Instance.new("Frame")
+	frame.BackgroundColor3 = Color3.new(0, 0, 0)
+	frame.BackgroundTransparency = transparency
+	frame.BorderSizePixel = 0
+	frame.Size = UDim2.new(1, 0, 1, 0)
+	frame.ZIndex = 2
+	frame.Parent = g
+	return frame
+end
+
+-- The reveal: black flash -> sting -> name-slam line
+local function playReveal(data: any)
+	local g = gui
+	if not g then
+		return
+	end
+	local flash = black(0)
+	SoundKit.play(if data.correct then "StingReveal" else "StingWrong")
+	local line = Theme.label(g, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.45, 0),
+		Size = UDim2.new(0.9, 0, 0, 120),
+		Font = Theme.TitleFont,
+		TextSize = 12,
+		TextColor3 = if data.correct then Theme.Gold else Theme.Sickly,
+		TextStrokeTransparency = 0.3,
+		ZIndex = 3,
+		Text = if data.correct
+			then ("%s WAS %s"):format(string.upper(data.dollName or "?"), string.upper(data.spiritName or "THE SPIRIT"))
+			else ("%s WAS INNOCENT."):format(string.upper(data.dollName or "?")),
+	})
+	TweenService:Create(line, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { TextSize = 52 }):Play()
+	task.delay(3, function()
+		TweenService:Create(flash, TweenInfo.new(0.8), { BackgroundTransparency = 1 }):Play()
+		TweenService:Create(line, TweenInfo.new(0.8), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+		task.delay(0.9, function()
+			flash:Destroy()
+			line:Destroy()
+		end)
+	end)
+end
+
+local function showRecap(data: any)
+	local g = gui
+	if not g then
+		return
+	end
+	local dim = black(0.35)
+	local card = Theme.panel(g, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.new(0, 460, 0, 400),
+		BackgroundTransparency = 0.02,
+		ZIndex = 3,
+	})
+	Theme.label(card, {
+		Position = UDim2.new(0, 0, 0, 14),
+		Size = UDim2.new(1, 0, 0, 26),
+		TextSize = 16,
+		TextColor3 = Theme.Muted,
+		Text = "THE NIGHT ENDS",
+	})
+	Theme.label(card, {
+		Position = UDim2.new(0, 0, 0, 40),
+		Size = UDim2.new(1, 0, 0, 110),
+		Font = Theme.TitleFont,
+		TextSize = 92,
+		Text = ("SHIFT %d"):format(data.shiftReached or 0),
+	})
+	local statLines = {
+		("Dolls cared for: %d"):format(data.dollsCleared or 0),
+		("The traitor was %s."):format(data.traitorName or "…unknown"),
+		("Best shift: %d"):format(data.bestShift or 0),
+	}
+	for i, text in statLines do
+		Theme.label(card, {
+			Position = UDim2.new(0, 0, 0, 150 + (i - 1) * 30),
+			Size = UDim2.new(1, 0, 0, 26),
+			Font = Theme.TitleFont,
+			TextSize = 21,
+			Text = text,
+		})
+	end
+	if data.isNewBest then
+		Theme.label(card, {
+			Position = UDim2.new(0, 0, 0, 246),
+			Size = UDim2.new(1, 0, 0, 34),
+			Font = Theme.TitleFont,
+			TextSize = 30,
+			TextColor3 = Theme.Gold,
+			Text = "✦ NEW BEST ✦",
+		})
+	end
+	if data.perfect then
+		Theme.label(card, {
+			Position = UDim2.new(0, 0, 0, 278),
+			Size = UDim2.new(1, 0, 0, 26),
+			TextSize = 16,
+			TextColor3 = Theme.Gold,
+			Text = "Perfect shifts, zero strikes. The Dollmaker approves.",
+		})
+	end
+	local button = Theme.button(card, {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -16),
+		Size = UDim2.new(0, 220, 0, 56),
+		TextSize = 22,
+		Text = "RETURN",
+	})
+	button.Activated:Connect(function()
+		dim:Destroy()
+		card:Destroy()
+	end)
+	task.delay(20, function()
+		if dim.Parent then
+			dim:Destroy()
+			card:Destroy()
+		end
+	end)
+end
+
+function RecapUI.init()
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local g = Theme.screenGui("PorcelainRecap", 16)
+	g.Parent = playerGui
+	gui = g
+
+	Remotes.get(Remotes.Names.BanishResult).OnClientEvent:Connect(function(data: any)
+		if typeof(data) == "table" then
+			playReveal(data)
+		end
+	end)
+	Remotes.get(Remotes.Names.Recap).OnClientEvent:Connect(function(data: any)
+		if typeof(data) == "table" then
+			task.delay(1, function()
+				showRecap(data)
+			end)
+		end
+	end)
+end
+
+return RecapUI
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="55">
+            <Properties>
+              <string name="Name">Toast</string>
+              <string name="Source"><![CDATA[--!strict
+-- Bottom-center transient message queue. Other controllers may require this for local toasts.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Remotes = require(Shared:WaitForChild("Remotes")) :: any
+local Theme = require(script.Parent.Parent:WaitForChild("Theme")) :: any
+
+local Toast = {}
+
+local gui: ScreenGui? = nil
+local container: Frame? = nil
+
+local function ensureGui()
+	if gui and gui.Parent then
+		return
+	end
+	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+	local g = Theme.screenGui("PorcelainToast", 20)
+	g.Parent = playerGui
+	local c = Instance.new("Frame")
+	c.BackgroundTransparency = 1
+	c.AnchorPoint = Vector2.new(0.5, 1)
+	c.Position = UDim2.new(0.5, 0, 1, -110)
+	c.Size = UDim2.new(0.7, 0, 0, 200)
+	c.Parent = g
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+	layout.Padding = UDim.new(0, 6)
+	layout.Parent = c
+	gui = g
+	container = c
+end
+
+function Toast.show(message: string, seconds: number?)
+	ensureGui()
+	local c = container
+	if not c then
+		return
+	end
+	local panel = Theme.panel(c, {
+		Size = UDim2.new(1, 0, 0, 44),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 0.25,
+	})
+	local label = Theme.label(panel, {
+		Size = UDim2.new(1, -24, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Position = UDim2.new(0, 12, 0, 10),
+		Font = Theme.TitleFont,
+		TextSize = 22,
+		Text = message,
+	})
+	local pad = Instance.new("UIPadding")
+	pad.PaddingBottom = UDim.new(0, 10)
+	pad.Parent = panel
+	local _ = label
+	task.delay(seconds or 4, function()
+		TweenService:Create(panel, TweenInfo.new(0.5), { BackgroundTransparency = 1 }):Play()
+		for _, child in panel:GetDescendants() do
+			if child:IsA("TextLabel") then
+				TweenService:Create(child, TweenInfo.new(0.5), { TextTransparency = 1 }):Play()
+			end
+		end
+		task.delay(0.6, function()
+			panel:Destroy()
+		end)
+	end)
+end
+
+function Toast.init()
+	ensureGui()
+	Remotes.get(Remotes.Names.Toast).OnClientEvent:Connect(function(message: any, seconds: any)
+		if typeof(message) == "string" then
+			Toast.show(message, if typeof(seconds) == "number" then seconds else nil)
+		end
+	end)
+end
+
+return Toast
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
+        <Item class="ModuleScript" referent="56">
+          <Properties>
+            <string name="Name">Theme</string>
+            <string name="Source"><![CDATA[--!strict
+-- Client UI theme: horror-storybook. One place for colors/fonts + small constructors.
+
+local Theme = {}
+
+Theme.Bg = Color3.fromRGB(18, 14, 20)
+Theme.BgSoft = Color3.fromRGB(28, 22, 32)
+Theme.Parchment = Color3.fromRGB(230, 220, 200)
+Theme.Muted = Color3.fromRGB(170, 155, 175)
+Theme.Gold = Color3.fromRGB(212, 175, 96)
+Theme.Sickly = Color3.fromRGB(120, 160, 90)
+Theme.Danger = Color3.fromRGB(180, 70, 70)
+Theme.Accent = Color3.fromRGB(150, 120, 220)
+
+Theme.TitleFont = Enum.Font.Garamond
+Theme.BodyFont = Enum.Font.Gotham
+
+function Theme.screenGui(name: string, displayOrder: number?): ScreenGui
+	local gui = Instance.new("ScreenGui")
+	gui.Name = name
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.DisplayOrder = displayOrder or 5
+	return gui
+end
+
+function Theme.panel(parent: Instance, props: { [string]: any }): Frame
+	local frame = Instance.new("Frame")
+	frame.BackgroundColor3 = Theme.Bg
+	frame.BackgroundTransparency = 0.08
+	frame.BorderSizePixel = 0
+	for k, v in props do
+		(frame :: any)[k] = v
+	end
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = frame
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Theme.Muted
+	stroke.Transparency = 0.65
+	stroke.Thickness = 1
+	stroke.Parent = frame
+	frame.Parent = parent
+	return frame
+end
+
+function Theme.label(parent: Instance, props: { [string]: any }): TextLabel
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Font = Theme.BodyFont
+	label.TextColor3 = Theme.Parchment
+	label.TextWrapped = true
+	for k, v in props do
+		(label :: any)[k] = v
+	end
+	label.Parent = parent
+	return label
+end
+
+function Theme.button(parent: Instance, props: { [string]: any }): TextButton
+	local button = Instance.new("TextButton")
+	button.BackgroundColor3 = Theme.BgSoft
+	button.BorderSizePixel = 0
+	button.Font = Theme.TitleFont
+	button.TextColor3 = Theme.Parchment
+	button.AutoButtonColor = true
+	for k, v in props do
+		(button :: any)[k] = v
+	end
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = button
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Theme.Gold
+	stroke.Transparency = 0.7
+	stroke.Thickness = 1
+	stroke.Parent = button
+	button.Parent = parent
+	return button
+end
+
+return Theme
+]]></string>
+          </Properties>
+        </Item>
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="26">
+  <Item class="Workspace" referent="57">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
