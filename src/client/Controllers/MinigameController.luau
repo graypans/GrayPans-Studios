@@ -101,7 +101,52 @@ end
 
 -- ---------- minigames ----------
 
-local function mashGame(dollId: string, stepId: string)
+-- Procedural hairbrush icon (paddle head + bristles + handle), built from Frame/UICorner
+-- instances -- same zero-asset technique as GlyphRender.luau -- so it never depends on Roblox's
+-- emoji-glyph font coverage (B6: 🪮 rendered as a tofu box on some clients).
+local function drawBrushIcon(parent: GuiObject)
+	local canvas = Instance.new("Frame")
+	canvas.BackgroundTransparency = 1
+	canvas.Size = UDim2.fromScale(1, 1)
+	canvas.Parent = parent
+
+	local head = Instance.new("Frame")
+	head.AnchorPoint = Vector2.new(0.5, 0.5)
+	head.Position = UDim2.fromScale(0.5, 0.36)
+	head.Size = UDim2.fromScale(0.62, 0.36)
+	head.BackgroundColor3 = Theme.Parchment
+	head.BorderSizePixel = 0
+	head.Parent = canvas
+	local headCorner = Instance.new("UICorner")
+	headCorner.CornerRadius = UDim.new(1, 0)
+	headCorner.Parent = head
+
+	for i = 1, 5 do
+		local bristle = Instance.new("Frame")
+		bristle.AnchorPoint = Vector2.new(0.5, 1)
+		bristle.Position = UDim2.fromScale(0.19 + (i - 1) * 0.155, 0.2)
+		bristle.Size = UDim2.fromScale(0.05, 0.2)
+		bristle.BackgroundColor3 = Theme.Bg
+		bristle.BorderSizePixel = 0
+		bristle.Parent = canvas
+		local bristleCorner = Instance.new("UICorner")
+		bristleCorner.CornerRadius = UDim.new(1, 0)
+		bristleCorner.Parent = bristle
+	end
+
+	local handle = Instance.new("Frame")
+	handle.AnchorPoint = Vector2.new(0.5, 0.5)
+	handle.Position = UDim2.fromScale(0.5, 0.78)
+	handle.Size = UDim2.fromScale(0.16, 0.42)
+	handle.BackgroundColor3 = Theme.Gold
+	handle.BorderSizePixel = 0
+	handle.Parent = canvas
+	local handleCorner = Instance.new("UICorner")
+	handleCorner.CornerRadius = UDim.new(1, 0)
+	handleCorner.Parent = handle
+end
+
+local function mashGame(dollId: string, stepId: string, speedMultiplier: number)
 	local panel, arena = makePanel("Brush the Hair", "Tap the brush — smooth every tangle!")
 	local _, setProgress = progressBar(panel)
 	local progress = 0
@@ -109,12 +154,14 @@ local function mashGame(dollId: string, stepId: string)
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0.5, 0, 0.5, 0),
 		Size = UDim2.new(0, 160, 0, 120),
-		TextSize = 40,
-		Text = "🪮",
+		Text = "",
 	})
+	drawBrushIcon(button)
 	button.Activated:Connect(function()
 		SoundKit.play("BrushStroke")
-		progress += 0.09
+		-- SwiftHands class buff: speedMultiplier < 1 = faster, so divide (a smaller multiplier
+		-- means a bigger per-tap increment, fewer taps needed to fill the bar).
+		progress += 0.09 / speedMultiplier
 		setProgress(progress)
 		button.Rotation = (math.random() - 0.5) * 20
 		if progress >= 1 then
@@ -123,7 +170,7 @@ local function mashGame(dollId: string, stepId: string)
 	end)
 end
 
-local function holdGame(dollId: string, stepId: string, title: string, subtitle: string)
+local function holdGame(dollId: string, stepId: string, title: string, subtitle: string, speedMultiplier: number)
 	local panel, arena = makePanel(title, subtitle)
 	local _, setProgress = progressBar(panel)
 	local progress = 0
@@ -151,7 +198,8 @@ local function holdGame(dollId: string, stepId: string, title: string, subtitle:
 		-- circle drifts slowly; player must keep the press
 		circle.Position = UDim2.new(0.5 + math.sin(t * 0.7) * 0.22, 0, 0.5 + math.cos(t * 0.9) * 0.14, 0)
 		if holding then
-			progress += dt / 4
+			-- SwiftHands class buff: speedMultiplier < 1 = faster fill.
+			progress += dt / (4 * speedMultiplier)
 			setProgress(progress)
 			if progress >= 1 then
 				finish(dollId, stepId, true)
@@ -266,21 +314,24 @@ function MinigameController.init()
 	g.Parent = playerGui
 	gui = g
 
-	Remotes.get(Remotes.Names.MinigameStart).OnClientEvent:Connect(function(dollId: any, stepId: any, seed: any)
+	Remotes.get(Remotes.Names.MinigameStart).OnClientEvent:Connect(function(dollId: any, stepId: any, seed: any, speedMultiplierArg: any)
 		if typeof(dollId) ~= "string" or typeof(stepId) ~= "string" then
 			return
 		end
+		local speedMultiplier = if typeof(speedMultiplierArg) == "number" and speedMultiplierArg > 0
+			then speedMultiplierArg
+			else 1
 		closePanel()
 		activeKey = dollId .. stepId
 		local step = CareSteps.byId[stepId]
 		local kind = step and step.minigame or "mash"
 		if kind == "mash" then
-			mashGame(dollId, stepId)
+			mashGame(dollId, stepId, speedMultiplier)
 		elseif kind == "hold" then
 			if stepId == "Eyes" then
-				holdGame(dollId, stepId, "Polish the Eyes", "Hold the cloth steady — follow it as it drifts.")
+				holdGame(dollId, stepId, "Polish the Eyes", "Hold the cloth steady — follow it as it drifts.", speedMultiplier)
 			else
-				holdGame(dollId, stepId, "Wind the Music Box", "Hold the crank — don't let go until it sings.")
+				holdGame(dollId, stepId, "Wind the Music Box", "Hold the crank — don't let go until it sings.", speedMultiplier)
 			end
 		elseif kind == "sequence" then
 			sequenceGame(dollId, stepId, if typeof(seed) == "number" then seed else 1)

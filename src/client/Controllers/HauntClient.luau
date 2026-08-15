@@ -1,5 +1,6 @@
 --!strict
--- Client-scope haunts: WhisperPass, the Taken stub, and the DollmakerReveal run-end scare.
+-- Client-scope haunts: WhisperPass, the Taken stub, the DollmakerReveal run-end scare, and the
+-- B9 ShiftTimeout closing beat (calm, deliberately NOT a scare).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -162,6 +163,42 @@ local function dollmakerReveal()
 	end)
 end
 
+-- B9: the watchdog-timeout RunEnd -- a calm "closing time" beat, deliberately NOT a scare.
+local function shiftTimeout()
+	local g = gui
+	if not g then
+		return
+	end
+	SoundKit.play("DoorSlam") -- existing placeholder cue, thematically a closing door (id currently 0/silent)
+	local dim = Instance.new("Frame")
+	dim.BackgroundColor3 = Color3.new(0, 0, 0)
+	dim.BackgroundTransparency = 1
+	dim.BorderSizePixel = 0
+	dim.Size = UDim2.new(1, 0, 1, 0)
+	dim.ZIndex = 5
+	dim.Parent = g
+	local label = Theme.label(dim, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = UDim2.new(0.8, 0, 0, 80),
+		Font = Theme.TitleFont,
+		TextSize = 34,
+		TextColor3 = Theme.Muted,
+		TextTransparency = 1,
+		ZIndex = 6,
+		Text = "The shop is closing for the night…",
+	})
+	TweenService:Create(dim, TweenInfo.new(0.8), { BackgroundTransparency = 0.55 }):Play()
+	TweenService:Create(label, TweenInfo.new(0.8), { TextTransparency = 0 }):Play()
+	task.delay(3.5, function()
+		TweenService:Create(dim, TweenInfo.new(1), { BackgroundTransparency = 1 }):Play()
+		TweenService:Create(label, TweenInfo.new(1), { TextTransparency = 1 }):Play()
+		task.delay(1.1, function()
+			dim:Destroy()
+		end)
+	end)
+end
+
 function HauntClient.init()
 	local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
 	local g = Theme.screenGui("PorcelainHaunts", 18)
@@ -175,6 +212,8 @@ function HauntClient.init()
 			takenStub()
 		elseif hauntId == "DollmakerReveal" then
 			dollmakerReveal()
+		elseif hauntId == "ShiftTimeout" then
+			shiftTimeout()
 		end
 		-- unknown ids: ignore silently
 	end)

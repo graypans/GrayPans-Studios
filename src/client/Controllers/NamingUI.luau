@@ -17,6 +17,7 @@ local gui: ScreenGui? = nil
 local panel: Frame? = nil
 local offeredFor: { [string]: boolean } = {}
 local currentDollId: string? = nil
+local dollNames: { [string]: string } = {} -- dollId -> current display name, so the picker can exclude it (B10)
 
 local function close()
 	if panel then
@@ -63,16 +64,20 @@ local function offer(dollId: string)
 				child:Destroy()
 			end
 		end
+		-- exclude the doll's own current/default name so tapping a choice always does something (B10)
+		local currentName = dollNames[dollId]
 		local picked: { [number]: boolean } = {}
-		while true do
-			local count = 0
-			for _ in picked do
-				count += 1
+		local pickedCount = 0
+		local wanted = math.min(6, math.max(0, #DollNames - (if currentName then 1 else 0)))
+		local attempts = 0
+		local maxAttempts = #DollNames * 20 + 20 -- generous ceiling: a bad roll can never hang the UI (R2)
+		while pickedCount < wanted and attempts < maxAttempts do
+			attempts += 1
+			local index = math.random(1, #DollNames)
+			if not picked[index] and DollNames[index] ~= currentName then
+				picked[index] = true
+				pickedCount += 1
 			end
-			if count >= 6 then
-				break
-			end
-			picked[math.random(1, #DollNames)] = true
 		end
 		for index in picked do
 			local button = Theme.button(grid, {
@@ -124,6 +129,19 @@ function NamingUI.init()
 	g.Parent = playerGui
 	gui = g
 
+	-- track each doll's current name (default at spawn, then whatever ChooseName lands) so the
+	-- picker can filter its own current name out of its option list (B10)
+	Remotes.get(Remotes.Names.ShiftData).OnClientEvent:Connect(function(data: any)
+		if typeof(data) ~= "table" or typeof(data.dolls) ~= "table" then
+			return
+		end
+		for _, doll in data.dolls do
+			if typeof(doll) == "table" and typeof(doll.id) == "string" and typeof(doll.name) == "string" then
+				dollNames[doll.id] = doll.name
+			end
+		end
+	end)
+
 	-- offer naming when the local player finishes their first minigame on a doll:
 	-- MinigameStart implies this player is working that doll; offer after the step completes (DollUpdate).
 	local workingDoll: string? = nil
@@ -136,6 +154,9 @@ function NamingUI.init()
 		if typeof(dollId) ~= "string" or typeof(update) ~= "table" then
 			return
 		end
+		if typeof(update.name) == "string" then
+			dollNames[dollId] = update.name
+		end
 		if update.careDone and dollId == workingDoll and not offeredFor[dollId] then
 			offeredFor[dollId] = true
 			offer(dollId)
@@ -144,6 +165,7 @@ function NamingUI.init()
 	Remotes.get(Remotes.Names.StateChanged).OnClientEvent:Connect(function(state: any)
 		if state == "LobbyIdle" or state == "RunEnd" then
 			offeredFor = {}
+			dollNames = {}
 			close()
 		end
 	end)

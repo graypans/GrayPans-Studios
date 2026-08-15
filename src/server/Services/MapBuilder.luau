@@ -1,13 +1,26 @@
 --!strict
 -- Builds the entire world from parts at server start (edit mode shows an empty baseplate — expected).
 -- Per-room pcall segments: one broken room can't blank the world (plan review fix).
+--
+-- REDESIGNED per docs/packets/PACKET_1_MAP_DESIGN.md §4 ("Hollow Square" synthesis): a dead Victorian
+-- town square (Hub) around a broken fountain, facing the Dollmaker's shop, with a plus-shaped Workshop
+-- reached only by ShiftManager's existing ShiftIntro teleport (no walked corridor). Two structural
+-- decisions eliminate the exact bug class the first playtest found (A1 sealed room / A2 void gaps),
+-- BY CONSTRUCTION rather than by careful gap-matching:
+--   1. The Workshop is two overlapping full-footprint floor/ceiling slabs with walls ONLY on the
+--      outer perimeter of the plus-shape -- there are no interior walls anywhere to misalign a gap in.
+--   2. The Hub's Shop/Classes/Apothecary buildings are solid, unopened facades (no door/window cut
+--      through a wall at all) with mounted decorative props and a ProximityPrompt -- players never
+--      walk into them, so there is no interior to seal off or leave a hole in.
 
 local CollectionService = game:GetService("CollectionService")
 local Lighting = game:GetService("Lighting")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
 local Util = require(Shared:WaitForChild("Util")) :: any
+local ServerKind = require(Shared:WaitForChild("ServerKind")) :: any
 
 local MapBuilder = {}
 
@@ -16,6 +29,8 @@ local WOOD_DARK = Color3.fromRGB(41, 29, 22)
 local WALL = Color3.fromRGB(74, 62, 56)
 local FLOOR = Color3.fromRGB(52, 40, 34)
 local ACCENT = Color3.fromRGB(120, 96, 60)
+local STONE = Color3.fromRGB(88, 86, 92)
+local BOARD_WOOD = Color3.fromRGB(58, 42, 34)
 
 local root: Folder
 
@@ -47,48 +62,30 @@ local function box(cf: CFrame, size: Vector3, color: Color3, material: Enum.Mate
 	})
 end
 
--- Builds a rectangular room: floor, ceiling, 4 walls with optional door gaps (gapAxis: "X" or "Z" wall openings)
-local function room(center: Vector3, sizeX: number, sizeZ: number, height: number, gaps: { [string]: boolean })
-	local wallT = 1
-	box(CFrame.new(center.X, center.Y - 0.5, center.Z), Vector3.new(sizeX, 1, sizeZ), FLOOR, Enum.Material.Wood, "Floor")
-	box(CFrame.new(center.X, center.Y + height + 0.5, center.Z), Vector3.new(sizeX, 1, sizeZ), WOOD_DARK, Enum.Material.Wood, "Ceiling")
-	local h2 = center.Y + height / 2
-	local function wall(cf: CFrame, size: Vector3, gapKey: string)
-		if gaps[gapKey] then
-			-- split the wall into two segments leaving a 8-stud center gap
-			local along = if size.X > size.Z then "X" else "Z"
-			local full = if along == "X" then size.X else size.Z
-			local seg = (full - 8) / 2
-			if seg > 0.5 then
-				local off = (seg + 8) / 2
-				if along == "X" then
-					box(cf * CFrame.new(-off, 0, 0), Vector3.new(seg, size.Y, size.Z), WALL, Enum.Material.Wood, "Wall")
-					box(cf * CFrame.new(off, 0, 0), Vector3.new(seg, size.Y, size.Z), WALL, Enum.Material.Wood, "Wall")
-				else
-					box(cf * CFrame.new(0, 0, -off), Vector3.new(size.X, size.Y, seg), WALL, Enum.Material.Wood, "Wall")
-					box(cf * CFrame.new(0, 0, off), Vector3.new(size.X, size.Y, seg), WALL, Enum.Material.Wood, "Wall")
-				end
-				-- lintel above the gap
-				box(cf * CFrame.new(0, size.Y / 2 - 1.5, 0), Vector3.new(if along == "X" then 8 else size.X, 3, if along == "Z" then 8 else size.Z), WALL, Enum.Material.Wood, "Lintel")
-			end
-		else
-			box(cf, size, WALL, Enum.Material.Wood, "Wall")
-		end
-	end
-	wall(CFrame.new(center.X, h2, center.Z - sizeZ / 2), Vector3.new(sizeX, height, wallT), "N")
-	wall(CFrame.new(center.X, h2, center.Z + sizeZ / 2), Vector3.new(sizeX, height, wallT), "S")
-	wall(CFrame.new(center.X - sizeX / 2, h2, center.Z), Vector3.new(wallT, height, sizeZ), "W")
-	wall(CFrame.new(center.X + sizeX / 2, h2, center.Z), Vector3.new(wallT, height, sizeZ), "E")
+-- Invisible collision-only boundary (R2/A2-class-bug prevention: keeps players from ever walking
+-- off the Hub's open-sky Plaza/Alley into the void).
+local function guardWall(cf: CFrame, size: Vector3)
+	part({
+		Name = "HubBoundary",
+		CFrame = cf,
+		Size = size,
+		Transparency = 1,
+		CanCollide = true,
+		CanQuery = false,
+	})
 end
 
-local function lamp(pos: Vector3): Part
+local function lamp(pos: Vector3, flicker: boolean?): Part
 	local base = part({
 		Name = "Lamp",
 		CFrame = CFrame.new(pos),
 		Size = Vector3.new(0.8, 2.2, 0.8),
 		Color = ACCENT,
 		Material = Enum.Material.Metal,
-		Tag = "Lamp",
+		Tag = if flicker then "Lamp" else nil, -- HauntService's LightsOutBeat toggles every Lamp-tagged
+			-- light; Hub decorative lamps deliberately DON'T carry this tag (see hubLamp() below) so a
+			-- haunt firing during someone else's shift can't plunge waiting players into darkness. This
+			-- helper is now Workshop-only; see hubLamp() for the Hub's lamps.
 	})
 	local light = Instance.new("PointLight")
 	light.Color = Color3.fromRGB(255, 190, 120)
@@ -96,6 +93,35 @@ local function lamp(pos: Vector3): Part
 	light.Range = 16
 	light.Shadows = true
 	light.Parent = base
+	return base
+end
+
+-- Hub-only lamp: same visual, but NEVER tagged "Lamp" (see note above) so HauntService's
+-- LightsOutBeat, which only fires during an active Workshop shift, can't affect the Hub. `flicker`
+-- gives it a small continuous brightness wobble (graft #1: flicker stays confined to the Entry
+-- Alley's one hero lamp; the Plaza's corner lamps stay steady for join-square legibility).
+local function hubLamp(pos: Vector3, flicker: boolean?): Part
+	local base = part({
+		Name = "HubLamp",
+		CFrame = CFrame.new(pos),
+		Size = Vector3.new(0.8, 2.2, 0.8),
+		Color = ACCENT,
+		Material = Enum.Material.Metal,
+	})
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 190, 120)
+	light.Brightness = 1.4
+	light.Range = 18
+	light.Shadows = true
+	light.Parent = base
+	if flicker then
+		task.spawn(function()
+			while base.Parent do
+				light.Brightness = 0.5 + math.random() * 1.1
+				task.wait(0.15 + math.random() * 0.35)
+			end
+		end)
+	end
 	return base
 end
 
@@ -130,21 +156,73 @@ local function prompt(parentPart: Part, action: string, object: string, holdSeco
 	p.ActionText = action
 	p.ObjectText = object
 	p.RequiresLineOfSight = false
-	p.MaxActivationDistance = 8
+	p.MaxActivationDistance = Config.Care.PromptDistance
 	p.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
 	p.HoldDuration = holdSeconds or 0
 	p.Parent = parentPart
 	return p
 end
 
--- Layout constants: lobby around origin, workshop 240 studs +X.
-local LOBBY = Vector3.new(0, 0, 0)
-local SHOP = Vector3.new(240, 0, 0)
-local H = 14
+-- A lit window: a glass pane + interior PointLight + doll-silhouette props behind the glass
+-- (graft #2 from the map-design judge pass). Mounted ON the wall's outer surface -- never cut
+-- through it, so it can't reproduce the A1/A2 gap-bug class.
+local function litWindow(cf: CFrame, silhouetteCount: number?)
+	local pane = part({
+		Name = "WindowPane",
+		CFrame = cf,
+		Size = Vector3.new(5, 5, 0.2),
+		Color = Color3.fromRGB(150, 170, 220),
+		Material = Enum.Material.Glass,
+		Transparency = 0.35,
+		CanCollide = false,
+		Tag = "WindowPane",
+	})
+	local glow = Instance.new("PointLight")
+	glow.Color = Color3.fromRGB(255, 200, 140)
+	glow.Brightness = 1.2
+	glow.Range = 10
+	glow.Parent = pane
+	for i = 1, (silhouetteCount or 2) do
+		box(
+			cf * CFrame.new(-1.4 + (i - 1) * 1.6, -0.6, 0.3),
+			Vector3.new(0.8, 1.8, 0.4),
+			Color3.fromRGB(20, 16, 22),
+			Enum.Material.SmoothPlastic,
+			"DollSilhouette"
+		)
+	end
+	return pane
+end
+
+-- Two overlapping full-footprint slabs (a plus-shape floor/ceiling) with NO interior walls -- the
+-- direct A1/A2 fix. `arms` is a list of {center, footprint} boxes; every arm must be listed BEFORE
+-- any perimeter wall is built, and any two arms that should connect must overlap by several studs
+-- (not just touch edges) so there's never a seam a player can fall through.
+local function plusSlab(arms: { { center: Vector3, footprint: Vector3 } }, height: number)
+	for _, arm in arms do
+		box(CFrame.new(arm.center) * CFrame.new(0, -0.5, 0), arm.footprint, FLOOR, Enum.Material.Wood, "Floor")
+		box(CFrame.new(arm.center) * CFrame.new(0, height + 0.5, 0), arm.footprint, WOOD_DARK, Enum.Material.Wood, "Ceiling")
+	end
+end
+
+-- Layout origins: Hub around world origin; Workshop far away (never walked to, only reached via
+-- ShiftManager's ShiftIntro teleport) so the two zones never visually or physically overlap.
+-- StreamingEnabled stays false (R8), so the distance costs nothing at runtime.
+local HUB = Vector3.new(0, 0, 0)
+local WS = Vector3.new(0, 0, 600)
+local H_HUB = 16 -- Hub building height
+local H_WS = 14 -- Workshop interior height
 
 function MapBuilder.build(): (any, { string })
 	local failures: { string } = {}
-	local manifest: any = { benchSlots = {}, glyphSpawns = {}, lamps = {}, hauntDoors = {}, windowPanes = {} }
+	local manifest: any = {
+		benchSlots = {},
+		glyphSpawns = {},
+		lamps = {},
+		hauntDoors = {},
+		windowPanes = {},
+		joinSquares = {},
+	}
 
 	root = Instance.new("Folder")
 	root.Name = "PorcelainMap"
@@ -159,13 +237,36 @@ function MapBuilder.build(): (any, { string })
 		end
 	end
 
-	segment("Lobby", function()
-		room(LOBBY, 44, 44, H, { E = true })
-		-- warm lobby lamps
-		lamp(LOBBY + Vector3.new(-16, 1.1, -16))
-		lamp(LOBBY + Vector3.new(-16, 1.1, 16))
-		lamp(LOBBY + Vector3.new(16, 1.1, -16))
-		-- spawn
+	-- One-Place-plus-ReserveServer topology (PACKET_1_LOBBY_SYSTEMS.md, Join Squares §2): a live
+	-- reserved shift server has no players walking the Hub and a public lobby server never runs a
+	-- shift in-place, so each server kind only needs to build the half of the map it will actually
+	-- use. Both halves always build in Studio (ServerKind.isSameServerMode() is always true there),
+	-- so this has zero effect on today's Studio playtest.
+	local buildLobby = ServerKind.isSameServerMode() or ServerKind.isPublicLobbyServer()
+	local buildWorkshop = ServerKind.isSameServerMode() or ServerKind.isReservedShiftServer()
+
+	-- ============================== HUB ==============================
+	if buildLobby then
+
+	segment("EntryAlley", function()
+		local center = HUB + Vector3.new(0, 0, -42)
+		box(CFrame.new(center) * CFrame.new(0, -0.5, 0), Vector3.new(10, 1, 24), FLOOR, Enum.Material.Concrete, "Floor")
+		-- side walls (full length -- alley is only open at its two short ends)
+		box(CFrame.new(center + Vector3.new(-5, H_HUB / 2, 0)), Vector3.new(1, H_HUB, 24), WALL, Enum.Material.Brick, "Wall")
+		box(CFrame.new(center + Vector3.new(5, H_HUB / 2, 0)), Vector3.new(1, H_HUB, 24), WALL, Enum.Material.Brick, "Wall")
+		-- dead end (back wall) with a leaning sign
+		local backWall = box(CFrame.new(center + Vector3.new(0, H_HUB / 2, -12)), Vector3.new(10, H_HUB, 1), WALL, Enum.Material.Brick, "Wall")
+		local sign = box(
+			backWall.CFrame * CFrame.new(0, -2, 0.6) * CFrame.Angles(0, 0, math.rad(6)),
+			Vector3.new(4, 2, 0.2),
+			WOOD_DARK,
+			Enum.Material.WoodPlanks,
+			"NoAdmittanceSign"
+		)
+		surfaceText(sign, Enum.NormalId.Back, { { text = "NO ADMITTANCE", size = 24 } })
+		-- invisible guard walls so nobody can clip past the alley's open top
+		guardWall(CFrame.new(center + Vector3.new(0, H_HUB + 4, 0)), Vector3.new(10, 4, 24))
+		-- spawn, faces north (+Z) toward the Plaza
 		local spawn = Instance.new("SpawnLocation")
 		spawn.Anchored = true
 		spawn.Neutral = true
@@ -173,131 +274,253 @@ function MapBuilder.build(): (any, { string })
 		spawn.Transparency = 1
 		spawn.CanCollide = false
 		spawn.Size = Vector3.new(8, 1, 8)
-		spawn.CFrame = CFrame.new(LOBBY + Vector3.new(-10, 0.5, 0))
+		spawn.CFrame = CFrame.new(HUB + Vector3.new(0, 0.5, -50))
 		CollectionService:AddTag(spawn, "LobbySpawn")
 		spawn.Parent = root
 		manifest.lobbySpawn = spawn
-		-- ready pad: glowing circle
-		local pad = part({
-			Name = "ReadyPad",
-			Shape = Enum.PartType.Cylinder,
-			CFrame = CFrame.new(LOBBY + Vector3.new(12, 0.15, 0)) * CFrame.Angles(0, 0, math.rad(90)),
-			Size = Vector3.new(0.3, 12, 12),
-			Color = Color3.fromRGB(150, 120, 220),
-			Material = Enum.Material.Neon,
-			Transparency = 0.55,
-			CanCollide = false,
-			Tag = "ReadyPad",
-		})
-		manifest.readyPad = pad
-		local padLabel = part({
-			Name = "ReadyPadSign",
-			CFrame = CFrame.new(LOBBY + Vector3.new(12, 6.5, -7)),
-			Size = Vector3.new(8, 3, 0.4),
-			Color = WOOD_DARK,
-		})
-		surfaceText(padLabel, Enum.NormalId.Front, {
-			{ text = "STAND HERE", size = 42 },
-			{ text = "to start the night shift", size = 24 },
-		})
-		-- chalkboard
+		-- one flickering lamp (graft #1: flicker stays confined to the alley)
+		hubLamp(center + Vector3.new(0, 1.1, 0), true)
+		-- chalkboard, read on the walk in
 		local chalk = part({
 			Name = "Chalkboard",
-			CFrame = CFrame.new(LOBBY + Vector3.new(0, 7, -21.4)),
-			Size = Vector3.new(18, 9, 0.5),
+			CFrame = CFrame.new(center + Vector3.new(-3.2, 7, 8)) * CFrame.Angles(0, math.rad(20), 0),
+			Size = Vector3.new(9, 6, 0.4),
 			Color = Color3.fromRGB(24, 30, 26),
 			Material = Enum.Material.SmoothPlastic,
 			Tag = "Chalkboard",
 		})
-		surfaceText(chalk, Enum.NormalId.Front, {
-			{ text = "HOUSE RULES", size = 46, color = Color3.fromRGB(232, 226, 205) },
-			{ text = "1. CARE for every doll.", size = 30 },
-			{ text = "2. WATCH for the wrong one.", size = 30 },
-			{ text = "3. FIND the glyphs. Match the ledger.", size = 30 },
-			{ text = "4. BANISH it before the Presence takes you.", size = 30 },
-			{ text = '"...and always tie the silver ribbon before a banishing. Always." — The Dollmaker', size = 22, color = Color3.fromRGB(170, 150, 190) },
+		surfaceText(chalk, Enum.NormalId.Back, {
+			{ text = "HOUSE RULES", size = 34, color = Color3.fromRGB(232, 226, 205) },
+			{ text = "1. CARE for every doll.", size = 20 },
+			{ text = "2. WATCH for the wrong one.", size = 20 },
+			{ text = "3. FIND the glyphs. Match the ledger.", size = 20 },
+			{ text = "4. BANISH it before the Presence takes you.", size = 20 },
+			{ text = '"...and always tie the silver ribbon before a banishing. Always." — The Dollmaker', size = 15, color = Color3.fromRGB(170, 150, 190) },
 		})
 		manifest.chalkboard = chalk
-		-- leaderboard
-		local board = part({
-			Name = "LeaderboardBoard",
-			CFrame = CFrame.new(LOBBY + Vector3.new(-21.4, 7, 0)) * CFrame.Angles(0, math.rad(90), 0),
-			Size = Vector3.new(12, 9, 0.5),
-			Color = WOOD_DARK,
-			Tag = "LeaderboardBoard",
-		})
-		manifest.leaderboardBoard = board
 	end)
 
-	segment("Corridor", function()
-		-- long connector from lobby to workshop with moonlit windows
-		local mid = (LOBBY + SHOP) / 2
-		local len = SHOP.X - LOBBY.X - 44
-		room(Vector3.new(mid.X, 0, 0), len, 12, H - 4, { W = true, E = true })
-		for i = 1, 3 do
-			local x = LOBBY.X + 44 + (len / 4) * i - len / 8
-			local pane = part({
-				Name = "WindowPane",
-				CFrame = CFrame.new(x, 8, -6 + 0.2),
-				Size = Vector3.new(5, 6, 0.2),
-				Color = Color3.fromRGB(150, 170, 220),
-				Material = Enum.Material.Glass,
-				Transparency = 0.6,
+	segment("Plaza", function()
+		box(CFrame.new(HUB) * CFrame.new(0, -0.5, 0), Vector3.new(70, 1, 60), STONE, Enum.Material.Slate, "Floor")
+		-- invisible guard walls around the open-sky Plaza's outer edges (A2-class fall-through prevention)
+		guardWall(CFrame.new(HUB + Vector3.new(-35.5, 10, 0)), Vector3.new(1, 20, 60))
+		guardWall(CFrame.new(HUB + Vector3.new(35.5, 10, 0)), Vector3.new(1, 20, 60))
+		guardWall(CFrame.new(HUB + Vector3.new(0, 10, 30.5)), Vector3.new(70, 20, 1))
+		-- steady corner lamps (graft #1: never flicker, so a haunt/lighting event never makes the
+		-- join squares unreadable on a phone screen)
+		hubLamp(HUB + Vector3.new(-28, 1.1, -24))
+		hubLamp(HUB + Vector3.new(28, 1.1, -24))
+		hubLamp(HUB + Vector3.new(-28, 1.1, 22))
+		hubLamp(HUB + Vector3.new(28, 1.1, 22))
+	end)
+
+	segment("Fountain", function()
+		local basin = part({
+			Name = "FountainBasin",
+			Shape = Enum.PartType.Cylinder,
+			CFrame = CFrame.new(HUB + Vector3.new(0, 1, 14)) * CFrame.Angles(0, 0, math.rad(90)),
+			Size = Vector3.new(2, 14, 14),
+			Color = STONE,
+			Material = Enum.Material.Concrete,
+		})
+		box(basin.CFrame * CFrame.new(2.2, 0, 0) * CFrame.Angles(0, 0, math.rad(-90)), Vector3.new(1.4, 1.4, 1.4), Color3.fromRGB(30, 26, 34), Enum.Material.SmoothPlastic, "PorcelainStatue")
+	end)
+
+	segment("JoinSquares", function()
+		-- Diamond-shaped floor tiles: a rotated-square footprint, glowing Neon material. One BasePart
+		-- per square, directly recolorable by JoinSquareService (idle/occupied/locking) -- see
+		-- docs/packets/PACKET_1_LOBBY_SYSTEMS.md's map addendum for why a solid diamond (not a hollow
+		-- outline) was chosen: it's the same visual read with far less construction risk, and it's a
+		-- pure decoration upgrade later if the team wants a true hollow outline.
+		local positions = {
+			HUB + Vector3.new(-24, 0.15, -6),
+			HUB + Vector3.new(-12, 0.15, 2),
+			HUB + Vector3.new(0, 0.15, 5),
+			HUB + Vector3.new(12, 0.15, 2),
+			HUB + Vector3.new(24, 0.15, -6),
+		}
+		for i, pos in positions do
+			local tile = part({
+				Name = "JoinSquare" .. i,
+				CFrame = CFrame.new(pos) * CFrame.Angles(0, math.rad(45), 0),
+				Size = Vector3.new(7, 0.3, 7),
+				Color = Config.JoinSquares.IdleColor,
+				Material = Enum.Material.Neon,
+				Transparency = 0.1,
 				CanCollide = false,
-				Tag = "WindowPane",
+				Tag = "JoinSquare",
 			})
-			table.insert(manifest.windowPanes, pane)
-			local moon = Instance.new("SpotLight")
-			moon.Color = Color3.fromRGB(160, 180, 255)
-			moon.Brightness = 0.8
-			moon.Range = 24
-			moon.Angle = 60
-			moon.Face = Enum.NormalId.Front
-			moon.Parent = pane
+			tile:SetAttribute("SquareIndex", i)
+			table.insert(manifest.joinSquares, tile)
 		end
 	end)
 
-	segment("WorkshopDoor", function()
-		-- lockable door at the workshop end of the corridor
+	segment("InvitePostbox", function()
+		local post = box(CFrame.new(HUB + Vector3.new(4, 1.5, -26)), Vector3.new(1.4, 3, 1.4), Color3.fromRGB(120, 34, 30), Enum.Material.Metal, "InvitePostbox")
+		CollectionService:AddTag(post, "InviteKiosk")
+		manifest.inviteKiosk = post
+		manifest.invitePrompt = prompt(post, "Send for a Friend", "Postbox")
+	end)
+
+	segment("DollmakerShop", function()
+		-- A solid, closed facade -- no door cut through the wall, no interior to build or seal off.
+		-- Players never walk inside; the ProximityPrompt is what "enters" the shop.
+		local center = HUB + Vector3.new(0, 0, 38)
+		box(CFrame.new(center) * CFrame.new(0, H_HUB / 2, 0), Vector3.new(26, H_HUB, 16), WALL, Enum.Material.Brick, "ShopBuilding")
+		box(CFrame.new(center) * CFrame.new(0, H_HUB + 3, 0), Vector3.new(28, 6, 18), WOOD_DARK, Enum.Material.Wood, "RoofCap")
+		local front = center + Vector3.new(0, 0, -8.1)
+		litWindow(CFrame.new(front + Vector3.new(-7, 7, 0)), 3)
+		litWindow(CFrame.new(front + Vector3.new(7, 7, 0)), 3)
+		local sign = box(CFrame.new(front + Vector3.new(0, H_HUB + 0.5, 0)), Vector3.new(14, 3, 0.5), WOOD_DARK, Enum.Material.Wood, "ShopSign")
+		surfaceText(sign, Enum.NormalId.Back, { { text = "THE DOLLMAKER'S", size = 30 } })
+		local stoop = box(CFrame.new(front + Vector3.new(0, 0.3, -1.5)), Vector3.new(6, 0.6, 3), STONE, Enum.Material.Concrete, "ShopStoop")
+		CollectionService:AddTag(stoop, "ShopKiosk")
+		manifest.shopKiosk = stoop
+		manifest.shopPrompt = prompt(stoop, "Enter the Shop", "The Dollmaker's")
+	end)
+
+	segment("ClassesShopfront", function()
+		local center = HUB + Vector3.new(-28, 0, 36)
+		box(CFrame.new(center) * CFrame.new(0, H_HUB / 2, 0), Vector3.new(16, H_HUB, 12), WALL, Enum.Material.Brick, "ClassesBuilding")
+		box(CFrame.new(center) * CFrame.new(0, H_HUB + 3, 0), Vector3.new(18, 6, 14), WOOD_DARK, Enum.Material.Wood, "RoofCap")
+		local front = center + Vector3.new(0, 0, -6.1)
+		litWindow(CFrame.new(front + Vector3.new(0, 6.5, 0)), 2)
+		-- crossed boarding over the window, matching the "boarded shopfront" reference look
+		box(CFrame.new(front + Vector3.new(0, 6.5, 0.15)) * CFrame.Angles(0, 0, math.rad(18)), Vector3.new(6, 0.3, 0.15), BOARD_WOOD, Enum.Material.WoodPlanks, "Board")
+		box(CFrame.new(front + Vector3.new(0, 6.5, 0.15)) * CFrame.Angles(0, 0, math.rad(-18)), Vector3.new(6, 0.3, 0.15), BOARD_WOOD, Enum.Material.WoodPlanks, "Board")
+		local sign = box(CFrame.new(front + Vector3.new(0, H_HUB - 1, 0)), Vector3.new(9, 2, 0.4), WOOD_DARK, Enum.Material.Wood, "TailorSign")
+		surfaceText(sign, Enum.NormalId.Back, { { text = "TAILOR", size = 22, color = Color3.fromRGB(150, 140, 130) } })
+		local stoop = box(CFrame.new(front + Vector3.new(0, 0.3, -1.2)), Vector3.new(5, 0.6, 2.4), STONE, Enum.Material.Concrete, "ClassesStoop")
+		CollectionService:AddTag(stoop, "ClassesKiosk")
+		manifest.classesKiosk = stoop
+		manifest.classesPrompt = prompt(stoop, "Browse Classes", "Tailor's Shopfront")
+	end)
+
+	segment("ApothecaryShopfront", function()
+		-- Pure backdrop dressing -- balances the skyline, sells nothing, no prompt.
+		local center = HUB + Vector3.new(28, 0, 36)
+		box(CFrame.new(center) * CFrame.new(0, H_HUB / 2, 0), Vector3.new(16, H_HUB, 12), WALL, Enum.Material.Brick, "ApothecaryBuilding")
+		box(CFrame.new(center) * CFrame.new(0, H_HUB + 3, 0), Vector3.new(18, 6, 14), WOOD_DARK, Enum.Material.Wood, "RoofCap")
+		local front = center + Vector3.new(0, 0, -6.1)
+		box(CFrame.new(front + Vector3.new(0, 6.5, 0)), Vector3.new(4.5, 4, 0.2), Color3.fromRGB(90, 100, 90), Enum.Material.Glass, "BoardedWindow")
+		box(CFrame.new(front + Vector3.new(0, 6.5, 0.15)) * CFrame.Angles(0, 0, math.rad(18)), Vector3.new(5, 0.3, 0.15), BOARD_WOOD, Enum.Material.WoodPlanks, "Board")
+		box(CFrame.new(front + Vector3.new(0, 6.5, 0.15)) * CFrame.Angles(0, 0, math.rad(-18)), Vector3.new(5, 0.3, 0.15), BOARD_WOOD, Enum.Material.WoodPlanks, "Board")
+	end)
+
+	segment("JournalNoticeboard", function()
+		local post = box(CFrame.new(HUB + Vector3.new(18, 3, 6)), Vector3.new(0.4, 6, 0.4), WOOD_DARK, Enum.Material.Wood, "NoticeboardPost")
+		local board = box(CFrame.new(HUB + Vector3.new(18, 5, 6)), Vector3.new(4.5, 3.5, 0.3), Color3.fromRGB(150, 120, 90), Enum.Material.Fabric, "JournalBoard")
+		CollectionService:AddTag(board, "JournalKiosk")
+		manifest.journalKiosk = board
+		surfaceText(board, Enum.NormalId.Front, { { text = "THE DOLLMAKER'S", size = 18 }, { text = "JOURNAL", size = 26 } })
+		manifest.journalPrompt = prompt(board, "Read the Journal", "Noticeboard")
+		local _ = post
+	end)
+
+	segment("LeaderboardBoards", function()
+		-- TWO separate boards per the reference screenshots: best-shift and dolls-cleared, flanking
+		-- the Shop.
+		local shiftBoard = box(
+			CFrame.new(HUB + Vector3.new(-16, 6.5, 29.4)),
+			Vector3.new(9, 7, 0.4),
+			WOOD_DARK,
+			Enum.Material.Wood,
+			"LeaderboardBoard"
+		)
+		CollectionService:AddTag(shiftBoard, "LeaderboardBoard")
+		manifest.leaderboardBoard = shiftBoard
+		local patientsBoard = box(
+			CFrame.new(HUB + Vector3.new(16, 6.5, 29.4)),
+			Vector3.new(9, 7, 0.4),
+			WOOD_DARK,
+			Enum.Material.Wood,
+			"PatientsBoard"
+		)
+		CollectionService:AddTag(patientsBoard, "PatientsBoard")
+		manifest.patientsBoard = patientsBoard
+	end)
+
+	-- Kept for compatibility with ShiftManager.setDoorLocked (it nil-safely no-ops if the Slab child
+	-- is absent, per docs/packets/PACKET_1_LOBBY_SYSTEMS.md Track C: repurposed as a static
+	-- "Shift N in progress" plaque, never a physical CanCollide slab -- entry to a shift is gated by
+	-- the join-square countdown now, not a walked-and-locked door.
+	segment("WorkshopStatusPlaque", function()
 		local doorModel = Instance.new("Model")
 		doorModel.Name = "WorkshopDoor"
 		CollectionService:AddTag(doorModel, "WorkshopDoor")
 		doorModel.Parent = root
-		local slab = part({
-			Name = "Slab",
-			CFrame = CFrame.new(SHOP.X - 23, 5, 0),
-			Size = Vector3.new(1.2, 10, 8),
-			Color = WOOD_DARK,
-			Material = Enum.Material.Wood,
-			Parent = doorModel,
-		})
-		doorModel.PrimaryPart = slab
-		local sign = part({
-			Name = "Sign",
-			CFrame = CFrame.new(SHOP.X - 23.8, 9, 0) * CFrame.Angles(0, math.rad(-90), 0),
-			Size = Vector3.new(6, 2, 0.3),
-			Color = Color3.fromRGB(30, 24, 28),
-			Parent = doorModel,
-		})
-		surfaceText(sign, Enum.NormalId.Front, { { text = "", size = 30 } })
+		local sign = box(CFrame.new(WS + Vector3.new(0, H_WS + 1, 8.4)), Vector3.new(6, 2, 0.3), Color3.fromRGB(30, 24, 28), nil, "Sign")
+		sign.Parent = doorModel
+		surfaceText(sign, Enum.NormalId.Back, { { text = "", size = 30 } })
 		manifest.workshopDoor = doorModel
 		manifest.workshopDoorSign = sign
 	end)
+	end -- buildLobby
 
-	segment("BenchRoom", function()
-		-- main workshop: bench room
-		room(SHOP, 44, 36, H, { W = true, N = true, S = true })
-		lamp(SHOP + Vector3.new(-18, 1.1, -14))
-		lamp(SHOP + Vector3.new(-18, 1.1, 14))
-		lamp(SHOP + Vector3.new(18, 1.1, 0))
-		-- workbench along the north side
-		local bench = box(CFrame.new(SHOP.X, 2, SHOP.Z - 13), Vector3.new(34, 4, 6), WOOD, Enum.Material.Wood, "Workbench")
+	-- ============================== WORKSHOP ==============================
+	if buildWorkshop then
+	-- One plus-shaped footprint: two overlapping slabs (built together, before any wall), then
+	-- perimeter walls on the OUTER boundary only. No interior wall is ever placed, which is what
+	-- makes the A1 (sealed Banish room) and A2 (void gap) bug class structurally impossible here,
+	-- not just carefully avoided.
+
+	segment("WorkshopShell", function()
+		plusSlab({
+			{ center = WS, footprint = Vector3.new(68, 1, 18) }, -- horizontal arm: Bench Wing + Foyer + Banish Wing
+			{ center = WS + Vector3.new(0, 0, -18), footprint = Vector3.new(16, 1, 36) }, -- vertical arm: Ledger Nook, overlaps the ENTIRE Foyer band (Z -9..9), an 18-stud overlap not an edge-touch
+		}, H_WS)
+
+		-- Outer boundary walls, traced clockwise from the horizontal arm's SE corner. Every segment
+		-- below is a plain solid wall -- there is no gap anywhere in this list, because there is
+		-- nowhere in this design a player is meant to walk OUT of the plus-shape.
+		local wallT = 1
+		local h2 = H_WS / 2
+		-- south wall (full width, X -34..34 at Z=9)
+		box(CFrame.new(WS + Vector3.new(0, h2, 9)), Vector3.new(68, H_WS, wallT), WALL, Enum.Material.Wood, "Wall")
+		-- Banish Wing east wall (X=34, Z -9..9)
+		box(CFrame.new(WS + Vector3.new(34, h2, 0)), Vector3.new(wallT, H_WS, 18), WALL, Enum.Material.Wood, "Wall")
+		-- Banish Wing north wall (Z=-9, X 8..34)
+		box(CFrame.new(WS + Vector3.new(21, h2, -9)), Vector3.new(26, H_WS, wallT), WALL, Enum.Material.Wood, "Wall")
+		-- Ledger Nook east wall (X=8, Z -27..-9)
+		box(CFrame.new(WS + Vector3.new(8, h2, -18)), Vector3.new(wallT, H_WS, 18), WALL, Enum.Material.Wood, "Wall")
+		-- Ledger Nook north wall (Z=-27, X -8..8, the "top" of the whole plus-shape)
+		box(CFrame.new(WS + Vector3.new(0, h2, -27)), Vector3.new(16, H_WS, wallT), WALL, Enum.Material.Wood, "Wall")
+		-- Ledger Nook west wall (X=-8, Z -27..-9)
+		box(CFrame.new(WS + Vector3.new(-8, h2, -18)), Vector3.new(wallT, H_WS, 18), WALL, Enum.Material.Wood, "Wall")
+		-- Bench Wing north wall (Z=-9, X -34..-8)
+		box(CFrame.new(WS + Vector3.new(-21, h2, -9)), Vector3.new(26, H_WS, wallT), WALL, Enum.Material.Wood, "Wall")
+		-- Bench Wing west wall (X=-34, Z -9..9)
+		box(CFrame.new(WS + Vector3.new(-34, h2, 0)), Vector3.new(wallT, H_WS, 18), WALL, Enum.Material.Wood, "Wall")
+
+		-- teleport landing point, default Enabled=true (a live reserved shift server has no
+		-- lobbySpawn to protect against, and TeleportAsync arrivals need somewhere enabled the
+		-- instant the server boots -- LobbyService.setShiftSpawnActive still toggles this in Studio's
+		-- single-server mode exactly as before).
+		local wspawn = Instance.new("SpawnLocation")
+		wspawn.Anchored = true
+		wspawn.Neutral = true
+		wspawn.Enabled = true
+		wspawn.Transparency = 1
+		wspawn.CanCollide = false
+		wspawn.Size = Vector3.new(6, 1, 6)
+		wspawn.CFrame = CFrame.new(WS + Vector3.new(0, 0.5, 0))
+		CollectionService:AddTag(wspawn, "WorkshopSpawn")
+		wspawn.Parent = root
+		manifest.workshopSpawn = wspawn
+	end)
+
+	segment("BenchWing", function()
+		local c = WS + Vector3.new(-21, 0, 0)
+		lamp(c + Vector3.new(4, 1.1, -6))
+		lamp(c + Vector3.new(4, 1.1, 6))
+		local bench = box(CFrame.new(c + Vector3.new(-10, 2, 0)), Vector3.new(4, 4, 16), WOOD, Enum.Material.Wood, "Workbench")
 		CollectionService:AddTag(bench, "Workbench")
 		manifest.workbench = bench
 		for i = 1, 5 do
+			local z = -8 + (i - 1) * 4
 			local slot = part({
 				Name = "BenchSlot" .. i,
-				CFrame = CFrame.new(SHOP.X - 17 + (i - 1) * 8.5, 4.6, SHOP.Z - 13),
+				CFrame = CFrame.new(c + Vector3.new(-10, 4.6, z)),
 				Size = Vector3.new(1, 1, 1),
 				Transparency = 1,
 				CanCollide = false,
@@ -306,10 +529,11 @@ function MapBuilder.build(): (any, { string })
 			})
 			table.insert(manifest.benchSlots, slot)
 		end
-		-- ribbon spool on the bench end
 		local spool = part({
 			Name = "RibbonSpool",
-			CFrame = CFrame.new(SHOP.X + 19, 4.8, SHOP.Z - 13),
+			-- dz=7.2 (not 8.5): south wall's inner face is at Z=8.5, so 8.5 would clip the spool
+			-- 0.8 studs into it; 7.2 keeps it seated on the bench top with a clean 0.5-stud gap.
+			CFrame = CFrame.new(c + Vector3.new(-10, 4.8, 7.2)),
 			Size = Vector3.new(1.6, 1.6, 1.6),
 			Color = Color3.fromRGB(200, 205, 215),
 			Material = Enum.Material.Metal,
@@ -317,70 +541,106 @@ function MapBuilder.build(): (any, { string })
 		})
 		manifest.ribbonSpool = spool
 		manifest.ribbonPrompt = prompt(spool, "Take Silver Ribbon", "Ribbon Spool")
-		-- workshop spawn (disabled by default; toggled during shifts)
-		local wspawn = Instance.new("SpawnLocation")
-		wspawn.Anchored = true
-		wspawn.Neutral = true
-		wspawn.Enabled = false
-		wspawn.Transparency = 1
-		wspawn.CanCollide = false
-		wspawn.Size = Vector3.new(6, 1, 6)
-		wspawn.CFrame = CFrame.new(SHOP + Vector3.new(0, 0.5, 8))
-		CollectionService:AddTag(wspawn, "WorkshopSpawn")
-		wspawn.Parent = root
-		manifest.workshopSpawn = wspawn
-	end)
-
-	segment("StorageAlcove", function()
-		local c = SHOP + Vector3.new(0, 0, -36 + 6)
-		room(Vector3.new(SHOP.X, 0, SHOP.Z - 36), 20, 20, H - 4, { S = true })
-		-- shelves with silhouette decor dolls
+		-- shelf decor (former "storage alcove"), along the north wall segment of this wing. Local X
+		-- range for this wing is roughly -13..13 (west wall at -13, workbench occupies -13..-9, the
+		-- closet-nook door hinge sits at -4) -- these three shelves at local X 1/5.5/10 stay clear of
+		-- both and well inside the east wall at +13.
 		for i = 1, 3 do
-			local shelf = box(CFrame.new(SHOP.X - 8 + (i - 1) * 8, 5, SHOP.Z - 44), Vector3.new(6, 0.6, 3), WOOD_DARK, Enum.Material.Wood, "Shelf")
+			-- dz=-7.5 (not -8.3): north wall's inner face is at Z=-8.5, so -8.3 would clip the
+			-- 0.6-half-depth shelf 0.4 studs into it; -7.5 keeps a clean 0.4-stud gap.
+			local shelf = box(CFrame.new(c + Vector3.new(1 + (i - 1) * 4.5, 5, -7.5)), Vector3.new(4, 0.6, 1.2), WOOD_DARK, Enum.Material.Wood, "Shelf")
 			for j = 1, 3 do
 				box(
-					shelf.CFrame * CFrame.new(-2 + (j - 1) * 2, 1.2, 0),
-					Vector3.new(0.9, 1.8, 0.7),
+					shelf.CFrame * CFrame.new(-1.2 + (j - 1) * 1.2, 1.2, 0),
+					Vector3.new(0.7, 1.8, 0.6),
 					Color3.fromRGB(25, 20, 24),
 					Enum.Material.SmoothPlastic,
 					"DecorDoll"
 				)
 			end
 		end
-		local _ = c
+		-- window on the outer (west) wall. Offset is WS-relative (matches the west wall's WS-relative
+		-- X=-34 from the boundary wall list above), NOT c-relative -- c is already offset -21 from WS.
+		table.insert(manifest.windowPanes, litWindow(CFrame.new(WS + Vector3.new(-33.4, 8, 0)) * CFrame.Angles(0, math.rad(90), 0), 0))
+		-- decorative closet nook (never load-bearing -- it's mounted flush on a solid wall, not an
+		-- opening cut through one)
+		local doorModel = Instance.new("Model")
+		doorModel.Name = "HauntDoor1"
+		CollectionService:AddTag(doorModel, "HauntDoor")
+		doorModel.Parent = root
+		local hinge = part({
+			Name = "Hinge",
+			CFrame = CFrame.new(c + Vector3.new(-4, 5, -8.5)),
+			Size = Vector3.new(0.4, 10, 0.4),
+			Transparency = 1,
+			CanCollide = false,
+			Parent = doorModel,
+		})
+		doorModel.PrimaryPart = hinge
+		part({
+			Name = "Panel",
+			CFrame = hinge.CFrame * CFrame.new(0, 0, 0.3),
+			Size = Vector3.new(3, 9.6, 0.5),
+			Color = WOOD_DARK,
+			Material = Enum.Material.Wood,
+			CanCollide = false,
+			Parent = doorModel,
+		})
+		table.insert(manifest.hauntDoors, doorModel)
 	end)
 
-	segment("LedgerRoom", function()
-		room(Vector3.new(SHOP.X, 0, SHOP.Z + 36), 24, 24, H - 4, { N = true })
-		lamp(Vector3.new(SHOP.X - 8, 1.1, SHOP.Z + 42))
-		local desk = box(CFrame.new(SHOP.X, 2, SHOP.Z + 42), Vector3.new(8, 4, 4), WOOD, Enum.Material.Wood, "LedgerDesk")
+	segment("LedgerNook", function()
+		local c = WS + Vector3.new(0, 0, -18)
+		lamp(c + Vector3.new(0, 1.1, -3))
+		local desk = box(CFrame.new(c + Vector3.new(0, 2, -6)), Vector3.new(8, 4, 4), WOOD, Enum.Material.Wood, "LedgerDesk")
 		CollectionService:AddTag(desk, "LedgerDesk")
 		local book = box(desk.CFrame * CFrame.new(0, 2.3, 0) * CFrame.Angles(0, 0, math.rad(8)), Vector3.new(3, 0.6, 2.2), Color3.fromRGB(90, 40, 40), Enum.Material.Fabric, "LedgerBook")
 		manifest.ledgerDesk = desk
 		manifest.ledgerPrompt = prompt(book, "Open Ledger", "Spirit Ledger")
-		-- detector rack beside the desk
 		local rack = part({
 			Name = "DetectorRack",
-			CFrame = CFrame.new(SHOP.X + 8, 3, SHOP.Z + 42),
+			CFrame = CFrame.new(c + Vector3.new(6, 3, -6)),
 			Size = Vector3.new(2, 6, 2),
 			Color = WOOD_DARK,
 			Tag = "DetectorRack",
 		})
 		manifest.detectorRack = rack
+		-- decorative closet nook on the west wall
+		local doorModel = Instance.new("Model")
+		doorModel.Name = "HauntDoor2"
+		CollectionService:AddTag(doorModel, "HauntDoor")
+		doorModel.Parent = root
+		local hinge = part({
+			Name = "Hinge",
+			CFrame = CFrame.new(c + Vector3.new(-7.5, 5, 4)) * CFrame.Angles(0, math.rad(90), 0),
+			Size = Vector3.new(0.4, 10, 0.4),
+			Transparency = 1,
+			CanCollide = false,
+			Parent = doorModel,
+		})
+		doorModel.PrimaryPart = hinge
+		part({
+			Name = "Panel",
+			CFrame = hinge.CFrame * CFrame.new(0, 0, 0.3),
+			Size = Vector3.new(3, 9.6, 0.5),
+			Color = WOOD_DARK,
+			Material = Enum.Material.Wood,
+			CanCollide = false,
+			Parent = doorModel,
+		})
+		table.insert(manifest.hauntDoors, doorModel)
 	end)
 
-	segment("BanishRoom", function()
-		-- east of bench room through the E gap? bench room gaps: W (corridor), N (storage... wait N is -Z toward storage), S (ledger +Z)
-		room(Vector3.new(SHOP.X + 36, 0, SHOP.Z), 28, 22, H - 2, { W = true })
-		-- carve the E wall gap of bench room handled by bench room's own walls (it has no E gap) — add a doorway connector
-		box(CFrame.new(SHOP.X + 22, H / 2, SHOP.Z), Vector3.new(2.5, H, 8), FLOOR, Enum.Material.Wood, "BanishDoorwayFloorPatch")
+	segment("BanishWing", function()
+		local c = WS + Vector3.new(21, 0, 0)
+		lamp(c + Vector3.new(4, 1.1, 0))
 		local boxModel = Instance.new("Model")
 		boxModel.Name = "BanishBox"
 		CollectionService:AddTag(boxModel, "BanishBox")
 		boxModel.Parent = root
 		local base = part({
 			Name = "Base",
-			CFrame = CFrame.new(SHOP.X + 40, 2.2, SHOP.Z),
+			CFrame = CFrame.new(c + Vector3.new(9, 2.2, 0)),
 			Size = Vector3.new(4, 4.4, 7),
 			Color = Color3.fromRGB(38, 26, 40),
 			Material = Enum.Material.Wood,
@@ -406,54 +666,28 @@ function MapBuilder.build(): (any, { string })
 		local depositPrompt = prompt(base, "Place the doll inside", "Banish Box", 0.5)
 		depositPrompt.Enabled = false
 		manifest.banishPrompt = depositPrompt
-		lamp(Vector3.new(SHOP.X + 46, 1.1, SHOP.Z - 8))
-	end)
-
-	segment("HauntDoors", function()
-		-- two hinged doors: storage entrance + ledger entrance
-		local defs = {
-			{ pos = Vector3.new(SHOP.X - 4, 0, SHOP.Z - 18), rotY = 0 },
-			{ pos = Vector3.new(SHOP.X + 4, 0, SHOP.Z + 18), rotY = 180 },
-		}
-		for i, def in defs do
-			local doorModel = Instance.new("Model")
-			doorModel.Name = "HauntDoor" .. i
-			CollectionService:AddTag(doorModel, "HauntDoor")
-			doorModel.Parent = root
-			local hinge = part({
-				Name = "Hinge",
-				CFrame = CFrame.new(def.pos + Vector3.new(0, 5, 0)) * CFrame.Angles(0, math.rad(def.rotY), 0),
-				Size = Vector3.new(0.4, 10, 0.4),
-				Transparency = 1,
-				CanCollide = false,
-				Parent = doorModel,
-			})
-			doorModel.PrimaryPart = hinge
-			part({
-				Name = "Panel",
-				CFrame = hinge.CFrame * CFrame.new(0, 0, 2),
-				Size = Vector3.new(0.5, 9.6, 4),
-				Color = WOOD_DARK,
-				Material = Enum.Material.Wood,
-				CanCollide = false,
-				Parent = doorModel,
-			})
-			table.insert(manifest.hauntDoors, doorModel)
-		end
+		-- window on the outer (east) wall. Offset is WS-relative (matches the east wall's WS-relative
+		-- X=34 from the boundary wall list above), NOT c-relative -- c is already offset +21 from WS.
+		table.insert(manifest.windowPanes, litWindow(CFrame.new(WS + Vector3.new(33.4, 8, 0)) * CFrame.Angles(0, math.rad(-90), 0), 0))
 	end)
 
 	segment("GlyphSpawns", function()
+		-- 3 per wing, all comfortably clear of walls/props (A3/B13 fix baked in from the start: none
+		-- of these sit in a corridor behind a locked door -- there is no corridor anymore -- and none
+		-- overlap the Banish Box's deposit prompt).
 		local spots = {
-			SHOP + Vector3.new(-19, 5.5, 10), -- bench room shadow corner
-			SHOP + Vector3.new(14, 1.5, 15), -- bench room floor
-			SHOP + Vector3.new(-6, 5.8, -44), -- storage shelf
-			SHOP + Vector3.new(8, 1.5, -40), -- storage floor corner
-			SHOP + Vector3.new(-9, 1.5, 40), -- ledger room corner
-			SHOP + Vector3.new(10, 6, 44), -- ledger room high shelf level
-			SHOP + Vector3.new(46, 1.5, 6), -- banish room corner
-			SHOP + Vector3.new(34, 7, -8), -- banish room high
-			Vector3.new((LOBBY.X + SHOP.X) / 2, 2, 4), -- corridor
-			Vector3.new((LOBBY.X + SHOP.X) / 2 + 30, 8, -4), -- corridor high
+			-- Bench Wing
+			WS + Vector3.new(-30, 5, 5),
+			WS + Vector3.new(-14, 2, -6),
+			WS + Vector3.new(-24, 7, 6),
+			-- Ledger Nook
+			WS + Vector3.new(-4, 2, -14),
+			WS + Vector3.new(5, 6, -22),
+			WS + Vector3.new(0, 2, -25),
+			-- Banish Wing
+			WS + Vector3.new(28, 2, -6),
+			WS + Vector3.new(14, 6, 5),
+			WS + Vector3.new(30, 7, 2),
 		}
 		for i, pos in spots do
 			local marker = part({
@@ -468,16 +702,19 @@ function MapBuilder.build(): (any, { string })
 			table.insert(manifest.glyphSpawns, marker)
 		end
 	end)
+	end -- buildWorkshop
 
 	segment("Atmosphere", function()
 		Lighting.FogEnd = 140
 		Lighting.FogStart = 30
 		Lighting.FogColor = Color3.fromRGB(18, 14, 22)
+		Lighting.ClockTime = 1.5
 		local atmo = Instance.new("Atmosphere")
 		atmo.Density = 0.35
 		atmo.Color = Color3.fromRGB(120, 110, 130)
 		atmo.Parent = Lighting
-		-- collect lamps into manifest
+		-- collect Workshop lamps into the manifest (Hub lamps are deliberately untagged -- see
+		-- hubLamp() -- so HauntService's LightsOutBeat can never affect players still in the Hub)
 		for _, inst in CollectionService:GetTagged("Lamp") do
 			table.insert(manifest.lamps, inst)
 		end

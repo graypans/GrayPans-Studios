@@ -55,9 +55,14 @@ function PresenceMath.step(state: PresenceState, cfg: PresenceConfig, dt: number
 	if state.allDollsDone then
 		fill *= cfg.LastDollAccelMultiplier
 	end
-	-- surge contributes directly, then decays
-	local surgeSpend = math.min(state.surge, cfg.RushDecayPerSecond * dt * 4)
-	state.surge = math.max(0, state.surge - cfg.RushDecayPerSecond * dt)
+	-- Surge is a bounded "rubber band" pool: spend it into the meter at a fixed rate
+	-- (RushDecayPerSecond points/sec) until the pool is empty, so a surge of amount S
+	-- always contributes exactly S total points over S / RushDecayPerSecond seconds —
+	-- never more. (B9 fix: the old code let the meter receive up to 4x that rate while
+	-- only draining the pool at 1x that rate, so a surge silently injected ~4x its
+	-- nominal amount into Presence. See tests/logic.spec.luau's "surge integral" checks.)
+	local surgeSpend = math.min(state.surge, cfg.RushDecayPerSecond * dt)
+	state.surge -= surgeSpend
 	state.value = math.min(cfg.Max, state.value + fill * dt + surgeSpend)
 end
 

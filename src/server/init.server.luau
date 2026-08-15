@@ -21,8 +21,11 @@ local TellService = require(ServicesFolder:WaitForChild("TellService")) :: any
 local PresenceService = require(ServicesFolder:WaitForChild("PresenceService")) :: any
 local HauntService = require(ServicesFolder:WaitForChild("HauntService")) :: any
 local BanishService = require(ServicesFolder:WaitForChild("BanishService")) :: any
+local ClassService = require(ServicesFolder:WaitForChild("ClassService")) :: any
 local LobbyService = require(ServicesFolder:WaitForChild("LobbyService")) :: any
 local ShiftManager = require(ServicesFolder:WaitForChild("ShiftManager")) :: any
+local JoinSquareService = require(ServicesFolder:WaitForChild("JoinSquareService")) :: any
+local QuestService = require(ServicesFolder:WaitForChild("QuestService")) :: any
 local DebugService = require(ServicesFolder:WaitForChild("DebugService")) :: any
 
 local manifest, failures = MapBuilder.build()
@@ -40,8 +43,11 @@ local ctx: any = {
 		PresenceService = PresenceService,
 		HauntService = HauntService,
 		BanishService = BanishService,
+		ClassService = ClassService,
 		LobbyService = LobbyService,
 		ShiftManager = ShiftManager,
+		JoinSquareService = JoinSquareService,
+		QuestService = QuestService,
 		DebugService = DebugService,
 	},
 }
@@ -56,8 +62,11 @@ local initOrder = {
 	"PresenceService",
 	"HauntService",
 	"BanishService",
+	"ClassService", -- needs DataService + DollService already initialized (StartWithRibbon buff)
 	"LobbyService",
 	"ShiftManager",
+	"JoinSquareService", -- additive; calls into ShiftManager.beginShiftFor only from event handlers
+	"QuestService", -- needs ShiftManager.onShiftCleared + DollService.onRibbonTied already registerable
 	"DebugService",
 }
 

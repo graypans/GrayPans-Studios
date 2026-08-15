@@ -5,8 +5,10 @@ local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config")) :: any
 local Remotes = require(Shared:WaitForChild("Remotes")) :: any
 local Glyphs = require(Shared:WaitForChild("Defs"):WaitForChild("Glyphs")) :: any
 local Spirits = require(Shared:WaitForChild("Defs"):WaitForChild("Spirits")) :: any
@@ -24,6 +26,70 @@ local matchBanner: TextLabel? = nil
 local found: { string } = {}
 local slots: { [number]: string? } = {}
 local selectedGlyph: string? = nil
+local deskPart: BasePart? = nil
+local distanceConn: RBXScriptConnection? = nil
+
+-- ---------- open / close + walk-away auto-close (B5) ----------
+
+local function stopDistanceWatch()
+	if distanceConn then
+		distanceConn:Disconnect()
+		distanceConn = nil
+	end
+end
+
+local function closeBook()
+	if gui then
+		gui.Enabled = false
+	end
+	stopDistanceWatch()
+end
+
+local function getLedgerDesk(): BasePart?
+	if deskPart and deskPart.Parent then
+		return deskPart
+	end
+	local tagged = CollectionService:GetTagged("LedgerDesk")
+	local part = tagged[1]
+	if part and part:IsA("BasePart") then
+		deskPart = part
+		return deskPart
+	end
+	return nil
+end
+
+local function startDistanceWatch()
+	stopDistanceWatch()
+	local desk = getLedgerDesk()
+	if not desk then
+		-- desk not found (shouldn't happen once MapBuilder has run) -- fail open rather than
+		-- trap the player with an unclosable book (R2)
+		return
+	end
+	distanceConn = RunService.Heartbeat:Connect(function()
+		local g = gui
+		if not g or not g.Enabled then
+			stopDistanceWatch()
+			return
+		end
+		local char = Players.LocalPlayer.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not root or not root:IsA("BasePart") then
+			return
+		end
+		if (root.Position - desk.Position).Magnitude > Config.Ledger.AutoCloseDistance then
+			closeBook()
+		end
+	end)
+end
+
+local function openBook()
+	if not gui then
+		return
+	end
+	gui.Enabled = true
+	startDistanceWatch()
+end
 
 local function glyphButton(parent: Instance, glyphId: string, size: number, onTap: (() -> ())?): TextButton
 	local button = Theme.button(parent, {
@@ -130,9 +196,7 @@ local function buildBook()
 		TextSize = 20,
 		Text = "✕",
 	})
-	close.Activated:Connect(function()
-		g.Enabled = false
-	end)
+	close.Activated:Connect(closeBook)
 
 	-- left page: spirits
 	local left = Instance.new("ScrollingFrame")
@@ -282,14 +346,9 @@ function LedgerUI.init()
 		if player ~= Players.LocalPlayer then
 			return
 		end
-		local parent = prompt.Parent
-		local desk = parent and parent:FindFirstAncestorOfClass("Model")
-		-- the ledger prompt sits on the book part; identify by tag on the desk or the prompt's ObjectText
-		if prompt.ObjectText == "Spirit Ledger" and gui then
-			gui.Enabled = true
+		if prompt.ObjectText == "Spirit Ledger" then
+			openBook()
 		end
-		local _ = desk
-		local _2 = CollectionService
 	end)
 
 	Remotes.get(Remotes.Names.GlyphFound).OnClientEvent:Connect(function(_glyphId: any, data: any)
@@ -310,10 +369,10 @@ function LedgerUI.init()
 		refreshSlots()
 	end)
 
-	-- close the book when a shift ends
+	-- close the book automatically: end of run, AND the shift->shift transition (B5).
 	Remotes.get(Remotes.Names.StateChanged).OnClientEvent:Connect(function(state: any)
-		if (state == "LobbyIdle" or state == "RunEnd") and gui then
-			gui.Enabled = false
+		if state == "LobbyIdle" or state == "RunEnd" or state == "ShiftResult" or state == "ShiftIntro" then
+			closeBook()
 		end
 	end)
 end

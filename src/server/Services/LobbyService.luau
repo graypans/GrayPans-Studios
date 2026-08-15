@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config")) :: any
 local Util = require(Shared:WaitForChild("Util")) :: any
+local Classes = require(Shared:WaitForChild("Defs"):WaitForChild("Classes")) :: any
 
 local LobbyService = {}
 
@@ -58,17 +59,25 @@ function LobbyService.refreshBillboard(player: Player)
 	local label = billboard and billboard:FindFirstChild("Stats")
 	if label and label:IsA("TextLabel") then
 		local stats = ctx.services.DataService.getStats(player)
-		label.Text = ("Best Shift: %d  ·  Dolls: %d"):format(stats.bestShift, stats.dollsCleared)
+		-- Reference screenshots: "Top Shift: N" plus the equipped class name underneath, in place
+		-- of a second numeric stat.
+		local equippedId = ctx.services.ClassService.getEquippedId(player)
+		local className = (Classes.byId[equippedId] and Classes.byId[equippedId].name) or "Apprentice"
+		label.Text = ("Top Shift: %d\n%s"):format(stats.bestShift, className)
 	end
 end
 
-local function refreshLeaderboard()
-	local board = ctx.manifest.leaderboardBoard
-	if not board then
-		return
-	end
-	local gui = board:FindFirstChild("BoardGui")
-	if not gui then
+-- Reference screenshots show TWO separate boards flanking the Shop, not one combined board:
+-- "Highest Shift" (bestShift) and "Patients Treated" (dollsCleared). B1's facing fix is baked in
+-- here too -- both boards sit at HUB Z=29.4 with no rotation, and every player position in the Plaza
+-- is south of that (Z < 30.5, sealed by the guard wall in MapBuilder's Plaza segment), so the
+-- readable SurfaceGui face must point toward -Z, which is Enum.NormalId.Front for an unrotated part.
+local function buildBoard(board: BasePart, title: string, rows: { { name: string, value: number } })
+	local existing = board:FindFirstChild("BoardGui")
+	local gui: SurfaceGui
+	if existing and existing:IsA("SurfaceGui") then
+		gui = existing
+	else
 		gui = Instance.new("SurfaceGui")
 		gui.Name = "BoardGui"
 		gui.Face = Enum.NormalId.Front
@@ -81,20 +90,11 @@ local function refreshLeaderboard()
 		layout.Padding = UDim.new(0, 4)
 		layout.Parent = gui
 	end
-	local sg = gui :: SurfaceGui
-	for _, child in sg:GetChildren() do
+	for _, child in gui:GetChildren() do
 		if child:IsA("TextLabel") then
 			child:Destroy()
 		end
 	end
-	local rows: { { name: string, best: number } } = {}
-	for _, player in Players:GetPlayers() do
-		local stats = ctx.services.DataService.getStats(player)
-		table.insert(rows, { name = player.DisplayName, best = stats.bestShift })
-	end
-	table.sort(rows, function(a, b)
-		return a.best > b.best
-	end)
 	local function addRow(text: string, size: number, color: Color3)
 		local label = Instance.new("TextLabel")
 		label.BackgroundTransparency = 1
@@ -103,11 +103,38 @@ local function refreshLeaderboard()
 		label.TextSize = size
 		label.TextColor3 = color
 		label.Text = text
-		label.Parent = sg
+		label.Parent = gui
 	end
-	addRow("NIGHT SHIFT RECORDS", 40, Color3.fromRGB(226, 216, 196))
+	addRow(title, 36, Color3.fromRGB(226, 216, 196))
 	for i = 1, math.min(#rows, 8) do
-		addRow(("%d.  %s — Shift %d"):format(i, rows[i].name, rows[i].best), 28, Color3.fromRGB(190, 170, 210))
+		addRow(("%d.  %s — %d"):format(i, rows[i].name, rows[i].value), 26, Color3.fromRGB(190, 170, 210))
+	end
+end
+
+local function refreshLeaderboard()
+	local shiftBoard = ctx.manifest.leaderboardBoard
+	local patientsBoard = ctx.manifest.patientsBoard
+	if not shiftBoard and not patientsBoard then
+		return
+	end
+	local shiftRows: { { name: string, value: number } } = {}
+	local dollRows: { { name: string, value: number } } = {}
+	for _, player in Players:GetPlayers() do
+		local stats = ctx.services.DataService.getStats(player)
+		table.insert(shiftRows, { name = player.DisplayName, value = stats.bestShift })
+		table.insert(dollRows, { name = player.DisplayName, value = stats.dollsCleared })
+	end
+	table.sort(shiftRows, function(a, b)
+		return a.value > b.value
+	end)
+	table.sort(dollRows, function(a, b)
+		return a.value > b.value
+	end)
+	if shiftBoard then
+		buildBoard(shiftBoard, "HIGHEST SHIFT", shiftRows)
+	end
+	if patientsBoard then
+		buildBoard(patientsBoard, "PATIENTS TREATED", dollRows)
 	end
 end
 

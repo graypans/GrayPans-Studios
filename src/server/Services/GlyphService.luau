@@ -133,6 +133,9 @@ function GlyphService.init(context: any)
 		if glyphId == nil then
 			slots[slotIndex] = nil
 			broadcast(nil, nil)
+			Util.safeCall("shiftObjectiveRefresh", function()
+				ctx.services.ShiftManager.refreshObjective()
+			end)
 			return
 		end
 		if typeof(glyphId) ~= "string" or not table.find(found, glyphId) then
@@ -140,6 +143,10 @@ function GlyphService.init(context: any)
 		end
 		slots[slotIndex] = glyphId
 		broadcast(nil, nil)
+		-- B2 fix: slotting into (or clearing from) the ledger can complete/break the spirit match.
+		Util.safeCall("shiftObjectiveRefresh", function()
+			ctx.services.ShiftManager.refreshObjective()
+		end)
 	end)
 
 	-- re-rack the detector if its carrier leaves/dies
@@ -234,6 +241,11 @@ function GlyphService.collect(player: Player, tokenId: string)
 	local glyphName = Glyphs.byId[token.glyphId] and Glyphs.byId[token.glyphId].name or token.glyphId
 	broadcast(token.glyphId, player.DisplayName)
 	Remotes.get(Remotes.Names.Toast):FireAllClients(("%s found a glyph: %s"):format(player.DisplayName, glyphName), 4)
+	-- B2 fix: a glyph collect can flip the HUD objective (care -> glyphs -> ledger), but nothing
+	-- told ShiftManager to recompute + rebroadcast it.
+	Util.safeCall("shiftObjectiveRefresh", function()
+		ctx.services.ShiftManager.refreshObjective()
+	end)
 end
 
 function GlyphService.getSlots(): { [number]: string? }

@@ -15,6 +15,7 @@ local DollNames = require(Shared:WaitForChild("Defs"):WaitForChild("DollNames"))
 local GlyphMatch = require(Shared:WaitForChild("Logic"):WaitForChild("GlyphMatch")) :: any
 local Escalation = require(Shared:WaitForChild("Logic"):WaitForChild("Escalation")) :: any
 local Draw = require(Shared:WaitForChild("Logic"):WaitForChild("Draw")) :: any
+local ServerKind = require(Shared:WaitForChild("ServerKind")) :: any
 
 local ShiftManager = {}
 
@@ -26,8 +27,17 @@ local shiftNumber = 1
 local strikes = 0
 local spirit: any = nil
 local shiftParams: any = nil
+local markedDollName: string? = nil -- A4/B7: mark-time name snapshot; recap must never depend on
+                                     -- the doll's server record still existing at RunEnd
+local lastBanishOutcome: string? = nil -- B11: nil | "wrongDoll" | "incomplete" -- drives the
+                                        -- post-wrong-banish objective string
+local runEndReason: string = "presence" -- "presence" | "watchdog" -- B9: RunEnd must say which one it was
 local runStats = { dollsCleared = 0, perfect = 0, strikesThisShift = 0 }
 local countdownActive = false
+local coinAwardedDolls: { [string]: boolean } = {} -- Economy: reset each ShiftIntro; guards against double-award per doll
+-- Social/Journal hook: fired from onBanishResolved's `correct` branch (Phase 8 merge) the instant a
+-- shift clears -- NOT at RunEnd/recordRun, so a player who wins shift 1 then quits still gets credit.
+local shiftClearedCallbacks: { ({ Player }, number) -> () } = {}
 
 local escalationCfg = {
 	BaseDollCount = Config.Shift.BaseDollCount,
@@ -69,6 +79,15 @@ local function currentObjective(): string
 	local slots = GlyphService.getSlots()
 	if not (spirit and GlyphMatch.matches(spirit.code, slots)) then
 		return "Match the spirit in the ledger."
+	end
+	-- B11 fix: the post-wrong-banish message must NOT tell players to do the exact thing they were
+	-- just penalized for. `lastBanishOutcome` is set in onBanishResolved and cleared at the start of
+	-- each shift, so these branches only fire after an actual wrong attempt THIS shift. The original
+	-- pre-attempt copy below is intentionally a little misleading by design and is untouched.
+	if lastBanishOutcome == "wrongDoll" then
+		return "That wasn't it. Find the REAL one."
+	elseif lastBanishOutcome == "incomplete" then
+		return "You had the right one — something's still missing. Try again."
 	end
 	return "Bring the WRONG doll to the Banish Box."
 end
@@ -127,14 +146,18 @@ local function armWatchdog(forState: string, gen: number)
 	task.delay(seconds, function()
 		if state == forState and stateGen == gen then
 			Util.warn(("WATCHDOG: state '%s' exceeded %ds — forcing transition"):format(forState, seconds))
-			Remotes.get(Remotes.Names.Toast):FireAllClients(("watchdog: forcing past %s"):format(forState), 4)
-			if forState == "ShiftIntro" then
-				transition("ShiftActive")
-			elseif forState == "ShiftActive" then
+			if forState == "ShiftActive" then
+				-- B9: a ShiftActive timeout is NOT a possession scare -- never reuse that framing.
+				runEndReason = "watchdog"
 				transition("RunEnd")
+			elseif forState == "ShiftIntro" then
+				Remotes.get(Remotes.Names.Toast):FireAllClients(("watchdog: forcing past %s"):format(forState), 4)
+				transition("ShiftActive")
 			elseif forState == "ShiftResult" then
+				Remotes.get(Remotes.Names.Toast):FireAllClients(("watchdog: forcing past %s"):format(forState), 4)
 				transition("ShiftIntro")
 			elseif forState == "RunEnd" then
+				Remotes.get(Remotes.Names.Toast):FireAllClients(("watchdog: forcing past %s"):format(forState), 4)
 				transition("LobbyIdle")
 			end
 		end
@@ -163,18 +186,26 @@ transition = function(newState: string)
 	stateGen += 1
 	local gen = stateGen
 	state = newState
-	broadcastState()
-	armWatchdog(newState, gen)
 
 	if newState == "LobbyIdle" then
+		-- B4 fix: reset run-scoped state (esp. `strikes`) BEFORE broadcastState() runs below, so
+		-- the StateChanged payload that announces LobbyIdle already carries strikes = 0 instead of
+		-- the just-ended run's strike count.
 		shiftNumber = 1
 		strikes = 0
 		spirit = nil
+		markedDollName = nil -- A4/B7: clear the mark-time snapshot between runs
+		lastBanishOutcome = nil -- B11: clear the post-banish objective override between runs
 		runStats = { dollsCleared = 0, perfect = 0, strikesThisShift = 0 }
 		participants = {}
 		setDoorLocked(false)
 		cleanupRun()
-	elseif newState == "ShiftIntro" then
+	end
+
+	broadcastState()
+	armWatchdog(newState, gen)
+
+	if newState == "ShiftIntro" then
 		pruneParticipants()
 		if #participants == 0 then
 			transition("LobbyIdle")
@@ -185,11 +216,17 @@ transition = function(newState: string)
 			ctx.services.LobbyService.setShiftSpawnActive(true)
 		end)
 		runStats.strikesThisShift = 0
+		coinAwardedDolls = {} -- Economy: fresh per-doll coin-award guard for this shift
+		lastBanishOutcome = nil -- B11: fresh shift, fresh objective wording
 		spirit = Draw.one(ctx.rng, Spirits.list)
 		shiftParams = Escalation.forShift(escalationCfg, shiftNumber, #participants)
+		shiftParams.classBuffs = ctx.services.ClassService.applyBuffs(shiftParams, participants) -- Economy
 		local names = Draw.sample(ctx.rng, DollNames, shiftParams.dollCount)
 		local markedIndex = ctx.rng:NextInteger(1, shiftParams.dollCount)
 		local dollInfos = ctx.services.DollService.spawnShift(shiftParams, names, markedIndex, ctx.rng)
+		-- A4/B7 fix: snapshot the marked doll's display name NOW, at mark-time, into ShiftManager's
+		-- own state. Recap must never depend on the doll's DollService record still existing later.
+		markedDollName = (dollInfos[markedIndex] and dollInfos[markedIndex].name) or "…someone"
 		ctx.services.GlyphService.startShift(spirit.code, ctx.rng)
 		teleportTo(ctx.manifest.workshopSpawn, participants)
 		Remotes.get(Remotes.Names.ShiftData):FireAllClients({
@@ -216,16 +253,28 @@ transition = function(newState: string)
 		end)
 	elseif newState == "RunEnd" then
 		stopShiftSystems()
-		-- THE scare
-		Remotes.get(Remotes.Names.HauntFired):FireAllClients("DollmakerReveal", {})
-		for _, lamp in ctx.manifest.lamps do
-			local light = lamp:FindFirstChildOfClass("PointLight")
-			if light then
-				light.Enabled = false
+		local reason = runEndReason
+		if reason == "watchdog" then
+			-- B9: a shift timeout is NOT a possession scare. No scream, no shadow face, no
+			-- lights-out -- just an honest, in-world "we're closing" beat.
+			Remotes.get(Remotes.Names.Toast):FireAllClients(
+				"The shift ran too long... the shop is closing for the night.",
+				6
+			)
+			Remotes.get(Remotes.Names.HauntFired):FireAllClients("ShiftTimeout", {})
+		else
+			-- THE scare (genuine Presence-maxed ending only)
+			Remotes.get(Remotes.Names.HauntFired):FireAllClients("DollmakerReveal", {})
+			for _, lamp in ctx.manifest.lamps do
+				local light = lamp:FindFirstChildOfClass("PointLight")
+				if light then
+					light.Enabled = false
+				end
 			end
 		end
-		local traitorId = ctx.services.DollService.getMarkedId()
-		local traitorName = if traitorId then ctx.services.DollService.getDisplayName(traitorId) else "…someone"
+		-- B7/A4 fix: use the name captured at mark-time (see ShiftIntro above), never a live
+		-- DollService lookup -- the marked doll's record may already be gone by RunEnd.
+		local traitorName = markedDollName or "…someone"
 		task.delay(4, function()
 			if stateGen ~= gen then
 				return
@@ -239,23 +288,35 @@ transition = function(newState: string)
 			pruneParticipants()
 			for _, player in participants do
 				local stats = ctx.services.DataService.getStats(player)
-				local isNewBest = shiftNumber - 1 > 0 and shiftNumber - 1 > stats.bestShift
+				-- B7 fix: shiftReached = "the shift number the player was on when the run ended"
+				-- (matches the HUD's live `SHIFT N` banner), NOT "shifts fully survived".
+				local isNewBest = shiftNumber > stats.bestShift
 				ctx.services.DataService.recordRun(player, {
-					shiftReached = shiftNumber - 1,
+					shiftReached = shiftNumber,
 					dollsCleared = runStats.dollsCleared,
 					perfect = runStats.perfect,
 				})
 				Remotes.get(Remotes.Names.Recap):FireClient(player, {
-					shiftReached = shiftNumber - 1,
+					shiftReached = shiftNumber,
 					dollsCleared = runStats.dollsCleared,
 					perfect = runStats.perfect > 0 and strikes == 0,
 					traitorName = traitorName,
-					bestShift = math.max(stats.bestShift, shiftNumber - 1),
+					bestShift = math.max(stats.bestShift, shiftNumber),
 					isNewBest = isNewBest,
+					reason = reason, -- "presence" | "watchdog" -- B9: recap must not lie about the cause
 				})
 			end
 			cleanupRun()
-			teleportTo(ctx.manifest.lobbySpawn, participants)
+			-- Join Squares: a live reserved shift server has no lobbySpawn to PivotTo -- hand the
+			-- group back via a real cross-server teleport instead. No-op difference in Studio /
+			-- same-server mode, where teleportTo's existing in-place behavior is still correct.
+			if ServerKind.isReservedShiftServer() then
+				Util.safeCall("sendGroupHome", function()
+					ctx.services.JoinSquareService.sendGroupHome(participants)
+				end)
+			else
+				teleportTo(ctx.manifest.lobbySpawn, participants)
+			end
 			transition("LobbyIdle")
 		end)
 	end
@@ -271,8 +332,16 @@ function ShiftManager.init(context: any)
 		return table.clone(participants)
 	end)
 
-	ctx.services.DollService.onStepCompleted(function(_player: Player, _dollId: string, _stepId: string)
+	ctx.services.DollService.onStepCompleted(function(_player: Player, dollId: string, _stepId: string)
 		ctx.services.PresenceService.notifyStepCompleted()
+		-- Economy: award per-doll coins the moment a doll's chain finishes (once per doll per shift)
+		if state == "ShiftActive" and not coinAwardedDolls[dollId] and ctx.services.DollService.nextStepFor(dollId) == nil then
+			coinAwardedDolls[dollId] = true
+			for _, participant in participants do
+				local mult = ctx.services.ClassService.getCoinMultiplier(participant)
+				ctx.services.DataService.addCoins(participant, math.floor(Config.Economy.CoinsPerDoll * mult))
+			end
+		end
 		if state == "ShiftActive" and ctx.services.DollService.allListedCareDone() then
 			ctx.services.PresenceService.setAllDollsDone(true)
 			ctx.services.BanishService.setUnlocked(true)
@@ -282,6 +351,9 @@ function ShiftManager.init(context: any)
 
 	ctx.services.PresenceService.onMaxed(function()
 		if state == "ShiftActive" then
+			-- B9: genuine Presence-maxed ending -- tag it explicitly (armWatchdog tags "watchdog"
+			-- on the other RunEnd path) so transition("RunEnd") knows which beat/message to use.
+			runEndReason = "presence"
 			transition("RunEnd")
 		end
 	end)
@@ -363,9 +435,8 @@ function ShiftManager.onBanishResolved(dollId: string)
 	local hasRibbon = DollService.hasRibbon(dollId)
 	local correct = isMarked and slotsMatch and hasRibbon
 
-	DollService.consume(dollId)
-
 	if correct then
+		DollService.consume(dollId)
 		Remotes.get(Remotes.Names.BanishResult):FireAllClients({
 			correct = true,
 			dollId = dollId,
@@ -377,25 +448,62 @@ function ShiftManager.onBanishResolved(dollId: string)
 		if runStats.strikesThisShift == 0 then
 			runStats.perfect += 1
 		end
+		-- Social: onShiftCleared hook (participants snapshot BEFORE shiftNumber increments)
+		pruneParticipants()
+		for _, cb in shiftClearedCallbacks do
+			Util.safeCall("shiftClearedCallback", cb, table.clone(participants), shiftNumber)
+		end
+		-- Economy: perfect-shift + late-shift coin bonus (uses PRE-increment shiftNumber = the
+		-- shift that was just cleared)
+		local lateBonusShifts = math.min(shiftNumber - 1, Config.Economy.LateShiftBonusCapShifts)
+		local flatBonus = (if runStats.strikesThisShift == 0 then Config.Economy.PerfectShiftBonus else 0)
+			+ lateBonusShifts * Config.Economy.LateShiftBonusPerShift
+		if flatBonus > 0 then
+			for _, participant in participants do
+				local mult = ctx.services.ClassService.getCoinMultiplier(participant)
+				ctx.services.DataService.addCoins(participant, math.floor(flatBonus * mult))
+			end
+		end
 		shiftNumber += 1
 		transition("ShiftResult")
+		return
+	end
+
+	-- A4 fix: every non-correct outcome used to be treated identically (strike + surge + consume),
+	-- which meant banishing the CORRECT doll without its ribbon tied destroyed the only doll that
+	-- could ever win the shift, soft-locking the run. Now: only a genuinely WRONG doll gets consumed.
+	strikes += 1
+	runStats.strikesThisShift += 1
+	ctx.services.PresenceService.surge(Config.Presence.WrongBanishSurge)
+
+	if isMarked then
+		lastBanishOutcome = "incomplete"
+		DollService.returnToBench(dollId)
+		Remotes.get(Remotes.Names.BanishResult):FireAllClients({
+			correct = false,
+			incomplete = true,
+			dollId = dollId,
+			dollName = dollName,
+			strikes = strikes,
+		})
+		Remotes.get(Remotes.Names.Toast):FireAllClients("The box would not close… something is missing.", 4)
 	else
-		strikes += 1
-		runStats.strikesThisShift += 1
-		ctx.services.PresenceService.surge(Config.Presence.WrongBanishSurge)
+		lastBanishOutcome = "wrongDoll"
+		DollService.consume(dollId)
 		Remotes.get(Remotes.Names.BanishResult):FireAllClients({
 			correct = false,
 			dollId = dollId,
 			dollName = dollName,
 			strikes = strikes,
 		})
-		if strikes >= Config.Shift.StrikeLimit then
-			transition("RunEnd")
-		else
-			-- the box relocks? No: care is still done; allow retry. Re-enable deposit.
-			ctx.services.BanishService.setUnlocked(true)
-			broadcastState()
-		end
+	end
+
+	if strikes >= Config.Shift.StrikeLimit + (shiftParams.classBuffs and shiftParams.classBuffs.strikeLimitBonus or 0) then
+		transition("RunEnd")
+	else
+		-- the box relocks? No: care is still done; allow retry. Re-enable deposit.
+		ctx.services.BanishService.setUnlocked(true)
+		broadcastState()
 	end
 end
 
@@ -414,6 +522,33 @@ end
 
 function ShiftManager.getSpirit(): any
 	return spirit
+end
+
+-- B2: lightweight objective-only refresh for services whose state changes affect the objective
+-- string but don't themselves warrant a full state transition (glyph collect / ledger slot).
+function ShiftManager.refreshObjective()
+	if state == "ShiftActive" then
+		broadcastState()
+	end
+end
+
+function ShiftManager.onShiftCleared(fn: ({ Player }, number) -> ())
+	table.insert(shiftClearedCallbacks, fn)
+end
+
+-- Join Squares: literally the same participants=...; transition("ShiftIntro") pair requestStart's
+-- own countdown already runs at zero -- ShiftIntro -> ShiftActive -> ShiftResult -> RunEnd then
+-- proceeds unmodified. Additive: does not touch requestStart or any existing function.
+function ShiftManager.beginShiftFor(occupants: { Player }): boolean
+	if state ~= "LobbyIdle" then
+		return false
+	end
+	if #occupants == 0 then
+		return false
+	end
+	participants = table.clone(occupants)
+	transition("ShiftIntro")
+	return true
 end
 
 -- ---------- debug hooks (R7) ----------

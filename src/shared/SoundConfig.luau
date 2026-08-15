@@ -42,6 +42,10 @@ local SoundConfig: { [string]: Cue } = {
 
 	-- Emotes
 	PanicBark = { soundId = 0, volume = 0.8 }, -- TODO(team): character yelp ("the characters scream so players don't have to")
+
+	-- Join squares
+	SquareLockIn = { soundId = 0, volume = 0.7 }, -- TODO(team): satisfying "lock-in" chime when a
+	                                                -- square resolves. UiClick/UiConfirm already cover ordinary button taps.
 }
 
 return SoundConfig

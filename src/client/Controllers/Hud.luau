@@ -174,8 +174,11 @@ function Hud.init()
 		if objectiveLabel then
 			objectiveLabel.Text = data.objective or ""
 		end
+		-- B4 fix: defensively force strike pips to zero on LobbyIdle regardless of whatever
+		-- `strikes` value is in this particular payload.
+		local displayStrikes = if state == "LobbyIdle" then 0 else (data.strikes or 0)
 		for i, pip in strikePips do
-			pip.BackgroundColor3 = if i <= (data.strikes or 0) then Theme.Danger else Theme.BgSoft
+			pip.BackgroundColor3 = if i <= displayStrikes then Theme.Danger else Theme.BgSoft
 		end
 		if dollList and (state == "LobbyIdle" or state == "RunEnd") then
 			dollList.Visible = false
@@ -205,6 +208,15 @@ function Hud.init()
 	Remotes.get(Remotes.Names.DollUpdate).OnClientEvent:Connect(function(dollId: any, update: any)
 		local entry = dollRows[dollId]
 		if not entry or typeof(update) ~= "table" then
+			return
+		end
+		if update.removed == true then
+			-- B8 fix: a consumed doll must stop reading as a fully-cared-for, still-in-play doll.
+			entry.nameLabel.Text = ("%s — gone"):format(entry.nameLabel.Text)
+			entry.nameLabel.TextColor3 = Theme.Muted
+			for _, tick in entry.ticks do
+				tick.BackgroundColor3 = Theme.BgSoft
+			end
 			return
 		end
 		if typeof(update.name) == "string" then

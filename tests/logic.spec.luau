@@ -173,6 +173,24 @@ do
 	PresenceMath.addSurge(st5, 12)
 	PresenceMath.step(st5, cfg, 1, 1)
 	check("event surge raises value", st5.value > 0.1)
+
+	-- surge integral: a surge event contributes exactly its nominal amount, never amplified (B9 fix)
+	local st6 = PresenceMath.new()
+	PresenceMath.addSurge(st6, 20)
+	local dt = 0.1
+	local ticks = 0
+	while st6.surge > 0 and ticks < 10000 do
+		PresenceMath.step(st6, cfg, dt, 0) -- rateMultiplier=0 isolates the surge-only contribution
+		ticks += 1
+	end
+	local elapsed = ticks * dt
+	check("surge fully drains", st6.surge == 0, tostring(st6.surge))
+	check("surge contributes exactly its nominal amount, not amplified", math.abs(st6.value - 20) < 0.01, tostring(st6.value))
+	check(
+		"surge drains in amount/DecayPerSecond seconds",
+		math.abs(elapsed - (20 / cfg.RushDecayPerSecond)) < 0.15,
+		tostring(elapsed)
+	)
 end
 
 print("== Draw ==")

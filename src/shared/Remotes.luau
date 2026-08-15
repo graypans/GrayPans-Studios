@@ -13,7 +13,7 @@ local DEFS: { [string]: RemoteKind } = {
 	-- Server -> Client
 	StateChanged = "Event", -- (stateName: string, payload: {}?)  payload includes objective text, shift number
 	ShiftData = "Event", -- (shiftNumber: number, dolls: {DollInfo}) manifest at shift start
-	DollUpdate = "Event", -- (dollId: string, update: {}) care progress / name changes
+	DollUpdate = "Event", -- (dollId: string, update: {}) care progress / name changes / removed: boolean?
 	GlyphFound = "Event", -- (glyphId: string, foundList: {string}, finderName: string)
 	PresenceTier = "Event", -- (tier: number) 0..3
 	HauntFired = "Event", -- (hauntId: string, params: {}?) client renders visuals
@@ -21,10 +21,18 @@ local DEFS: { [string]: RemoteKind } = {
 	Recap = "Event", -- (payload: recap card data)
 	Toast = "Event", -- (message: string, seconds: number?)
 	ReadyCountdown = "Event", -- (secondsLeft: number?) nil cancels
-	MinigameStart = "Event", -- (dollId: string, stepId: string, seed: number) server granted the lock
+	MinigameStart = "Event", -- (dollId: string, stepId: string, seed: number, speedMultiplier: number?)
+	                         -- server granted the lock; speedMultiplier is the SwiftHands class buff (<1 = faster)
 	MinigameCancel = "Event", -- (dollId: string, stepId: string) lock expired / released
 	BanishPrompt = "Event", -- (dollId: string, dollName: string) confirm UI open/close
 	DebugInfo = "Event", -- (payload: {}) overlay feed, DebugMode only
+
+	-- Server -> Client (economy / journal / join squares)
+	CoinsUpdate = "Event", -- (coins: number) pushed on any balance change (grant/spend) + once near PlayerAdded
+	ClassesData = "Event", -- (data: {owned: {[string]: boolean}, equipped: string}) pushed per-player on join/buy/equip
+	PlayerStats = "Event", -- (stats: DataService.Stats) full per-player stats snapshot -- fired on load + every change
+	JoinSquareUpdate = "Event", -- (squareId: string, data: {count, max, occupantUserIds: {number}, phase: string})
+	JoinSquareCountdown = "Event", -- (squareId: string, secondsLeft: number?) nil cancels -- mirrors ReadyCountdown
 
 	-- Client -> Server
 	RequestMinigame = "Event", -- (dollId: string, stepId: string)
@@ -40,6 +48,12 @@ local DEFS: { [string]: RemoteKind } = {
 	Panic = "Event", -- ()
 	ReadyPad = "Event", -- (standing: boolean) redundancy for pad touch detection
 	CameraReport = "Unreliable", -- (cframe: CFrame) ~8 Hz watched-check stream
+
+	-- Client -> Server (economy / journal / join squares)
+	BuyClass = "Event", -- (classId: string)
+	EquipClass = "Event", -- (classId: string)
+	ClaimQuest = "Event", -- (questId: string) client requests reward payout for a completed quest
+	JoinSquareAction = "Event", -- (squareId: string, action: "Exit" | "StartNow" | "SkipTutorial")
 }
 
 local FOLDER_NAME = "Remotes"

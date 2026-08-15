@@ -35,18 +35,25 @@ local function playReveal(data: any)
 	end
 	local flash = black(0)
 	SoundKit.play(if data.correct then "StingReveal" else "StingWrong")
+	local text
+	if data.correct then
+		text = ("%s WAS %s"):format(string.upper(data.dollName or "?"), string.upper(data.spiritName or "THE SPIRIT"))
+	elseif data.incomplete then
+		-- A4: this WAS the marked doll -- never tell players it was "innocent".
+		text = ("THE BOX WOULD NOT CLOSE ON %s… SOMETHING IS MISSING."):format(string.upper(data.dollName or "?"))
+	else
+		text = ("%s WAS INNOCENT."):format(string.upper(data.dollName or "?"))
+	end
 	local line = Theme.label(g, {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0.5, 0, 0.45, 0),
 		Size = UDim2.new(0.9, 0, 0, 120),
 		Font = Theme.TitleFont,
 		TextSize = 12,
-		TextColor3 = if data.correct then Theme.Gold else Theme.Sickly,
+		TextColor3 = if data.correct then Theme.Gold elseif data.incomplete then Theme.Accent else Theme.Sickly,
 		TextStrokeTransparency = 0.3,
 		ZIndex = 3,
-		Text = if data.correct
-			then ("%s WAS %s"):format(string.upper(data.dollName or "?"), string.upper(data.spiritName or "THE SPIRIT"))
-			else ("%s WAS INNOCENT."):format(string.upper(data.dollName or "?")),
+		Text = text,
 	})
 	TweenService:Create(line, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { TextSize = 52 }):Play()
 	task.delay(3, function()
@@ -68,7 +75,7 @@ local function showRecap(data: any)
 	local card = Theme.panel(g, {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0.5, 0, 0.5, 0),
-		Size = UDim2.new(0, 460, 0, 400),
+		Size = UDim2.new(0, 460, 0, 424),
 		BackgroundTransparency = 0.02,
 		ZIndex = 3,
 	})
@@ -86,6 +93,16 @@ local function showRecap(data: any)
 		TextSize = 92,
 		Text = ("SHIFT %d"):format(data.shiftReached or 0),
 	})
+	-- B9: the recap must not always imply "the Presence got you" -- say the real cause.
+	Theme.label(card, {
+		Position = UDim2.new(0, 0, 0, 150),
+		Size = UDim2.new(1, 0, 0, 22),
+		TextSize = 14,
+		TextColor3 = Theme.Muted,
+		Text = if data.reason == "watchdog"
+			then "The night ran long. The shop had to close before the Presence ever caught you."
+			else "The Presence caught up with you.",
+	})
 	local statLines = {
 		("Dolls cared for: %d"):format(data.dollsCleared or 0),
 		("The traitor was %s."):format(data.traitorName or "…unknown"),
@@ -93,7 +110,7 @@ local function showRecap(data: any)
 	}
 	for i, text in statLines do
 		Theme.label(card, {
-			Position = UDim2.new(0, 0, 0, 150 + (i - 1) * 30),
+			Position = UDim2.new(0, 0, 0, 178 + (i - 1) * 30),
 			Size = UDim2.new(1, 0, 0, 26),
 			Font = Theme.TitleFont,
 			TextSize = 21,
@@ -102,7 +119,7 @@ local function showRecap(data: any)
 	end
 	if data.isNewBest then
 		Theme.label(card, {
-			Position = UDim2.new(0, 0, 0, 246),
+			Position = UDim2.new(0, 0, 0, 270),
 			Size = UDim2.new(1, 0, 0, 34),
 			Font = Theme.TitleFont,
 			TextSize = 30,
@@ -112,7 +129,7 @@ local function showRecap(data: any)
 	end
 	if data.perfect then
 		Theme.label(card, {
-			Position = UDim2.new(0, 0, 0, 278),
+			Position = UDim2.new(0, 0, 0, 302),
 			Size = UDim2.new(1, 0, 0, 26),
 			TextSize = 16,
 			TextColor3 = Theme.Gold,

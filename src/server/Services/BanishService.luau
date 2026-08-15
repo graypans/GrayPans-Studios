@@ -217,6 +217,10 @@ end
 function BanishService.reset()
 	pending = nil
 	generation += 1
+	-- B3 fix: always broadcast cancelled=true, unconditionally -- not just from cancel()/resolve().
+	-- Confirmed live: without this, BanishPrompt countdown ticks kept firing after StateChanged(RunEnd)
+	-- and BanishConfirmUI's modal stayed visible into the next lobby session.
+	broadcastPrompt(nil, nil, { cancelled = true })
 	BanishService.setUnlocked(false)
 end
 

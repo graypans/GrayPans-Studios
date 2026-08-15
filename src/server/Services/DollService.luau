@@ -50,8 +50,10 @@ local locks: { [string]: { player: Player, stepId: string, expiry: number } } = 
 local ribbonHolders: { [Player]: boolean } = {}
 local carriers: { [Player]: { dollId: string, clone: Model } } = {}
 local stepCallbacks: { (Player, string, string) -> () } = {}
+local ribbonCallbacks: { (Player, string) -> () } = {} -- Social/Journal ribbon-tie counter hook
 local generation = 0
 local unlocked = false
+local careSpeedMultiplier = 1 -- shift-wide, from ClassService.applyBuffs' aggregate (SwiftHands buff)
 
 local function fire(name: string, ...: any)
 	Remotes.get(Remotes.Names[name]):FireAllClients(...)
@@ -345,6 +347,7 @@ function DollService.spawnShift(shiftParams: any, names: { string }, markedIndex
 	generation += 1
 	DollService.clearShift()
 	unlocked = false
+	careSpeedMultiplier = (shiftParams.classBuffs and shiftParams.classBuffs.careSpeedMultiplier) or 1
 	local manifest = ctx.manifest
 	local infos = {}
 	for i = 1, shiftParams.dollCount do
@@ -399,7 +402,8 @@ function DollService.onPromptTriggered(player: Player, dollId: string)
 	if nextStep then
 		locks[dollId] = { player = player, stepId = nextStep, expiry = os.clock() + Config.Care.MinigameSeconds }
 		refreshPrompt(rec)
-		fireTo(player, "MinigameStart", dollId, nextStep, math.random(1, 2 ^ 30))
+		-- SwiftHands class buff: shift-wide "<1 = faster" multiplier for MinigameController to apply
+		fireTo(player, "MinigameStart", dollId, nextStep, math.random(1, 2 ^ 30), careSpeedMultiplier)
 		return
 	end
 	-- 5 steps done: ribbon first if held, else pickup when unlocked
@@ -484,12 +488,23 @@ function DollService.tieRibbon(player: Player, dollId: string): boolean
 	fireTo(player, "DollUpdate", dollId, { ribbon = true })
 	fireTo(player, "Toast", ("You tie the silver ribbon around %s."):format(rec.name), 3)
 	refreshPrompt(rec)
+	for _, cb in ribbonCallbacks do
+		Util.safeCall("ribbonCallback", cb, player, dollId)
+	end
 	return true
 end
 
 function DollService.hasRibbon(dollId: string): boolean
 	local rec = dolls[dollId]
 	return rec ~= nil and rec.ribbonTied
+end
+
+-- grants a ribbon outside the spool-prompt flow (used by ClassService's StartWithRibbon buff at
+-- ShiftIntro). Mirrors the spool-prompt Triggered handler in wireWorld() exactly.
+function DollService.giveRibbon(player: Player): boolean
+	ribbonHolders[player] = true
+	fireTo(player, "Toast", "A silver ribbon is already tucked in your pocket.", 3)
+	return true
 end
 
 function DollService.setUnlocked(state: boolean)
@@ -582,6 +597,26 @@ function DollService.drop(player: Player)
 	end
 end
 
+-- companion to consume() -- undoes a deposit-into-the-box WITHOUT destroying the doll, for the
+-- "right doll, missing requirement" banish outcome (A4). Mirrors drop()'s restore logic but also
+-- moves the model back to its bench slot, since deposit() PivotTo'd it into the Banish Box.
+function DollService.returnToBench(dollId: string): boolean
+	local rec = dolls[dollId]
+	if not rec or rec.consumed then
+		return false
+	end
+	rec.model:PivotTo(rec.resting)
+	for _, d in rec.model:GetDescendants() do
+		if d:IsA("BasePart") then
+			d.Transparency = if d.Name == "Root" then 1 else 0
+		elseif d:IsA("SurfaceGui") or d:IsA("BillboardGui") then
+			(d :: any).Enabled = true
+		end
+	end
+	refreshPrompt(rec)
+	return true
+end
+
 function DollService.getCarried(player: Player): string?
 	local carry = carriers[player]
 	return carry and carry.dollId or nil
@@ -632,6 +667,9 @@ function DollService.consume(dollId: string)
 	end
 	rec.consumed = true
 	rec.prompt.Enabled = false
+	-- B8 fix: tell clients this doll is gone so Hud.luau's checklist panel stops showing it as a
+	-- fully-cared-for, still-in-play doll.
+	fire("DollUpdate", dollId, { removed = true })
 	-- sink + fade
 	local parts = {}
 	for _, d in rec.model:GetDescendants() do
@@ -654,6 +692,10 @@ end
 
 function DollService.onStepCompleted(fn: (Player, string, string) -> ())
 	table.insert(stepCallbacks, fn)
+end
+
+function DollService.onRibbonTied(fn: (Player, string) -> ())
+	table.insert(ribbonCallbacks, fn)
 end
 
 -- ---------- tells (procedural motion) ----------

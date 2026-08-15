@@ -110,6 +110,17 @@ function BanishConfirmUI.init()
 		end
 		confirmed = false
 	end)
+
+	-- B3 fix: belt-and-suspenders close. State transitions are the more fundamental signal.
+	Remotes.get(Remotes.Names.StateChanged).OnClientEvent:Connect(function(state: any)
+		if state == "RunEnd" or state == "LobbyIdle" then
+			local g = gui
+			if g then
+				g.Enabled = false
+			end
+			confirmed = false
+		end
+	end)
 end
 
 return BanishConfirmUI
