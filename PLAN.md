@@ -1,120 +1,106 @@
-# PROJECT PORCELAIN — Overnight Beta Build Plan
+# PROJECT PORCELAIN — Overnight Beta Build Plan (v2, post-review)
 
 **Placeholder codename** (final name TBD by team). Theme: **haunted dolls** — The Dollmaker's workshop, per MASTER.md §9.
 **Goal:** by morning, a playable beta of the core loop exists in this repo, ready for the team to open in Roblox Studio and playtest.
-**This file is the build checklist.** Claude ticks items as they're completed overnight (`[x]`). Owner tags: **[CLAUDE]** = done autonomously overnight · **[TEAM]** = needs a human (Studio, dashboard, accounts) · **[LATER]** = deliberately not in the beta.
+**v2 note:** this plan was adversarially reviewed by 3 independent critics (50 findings) before the build started; the structure below is milestone-ordered (close the loop first, widen second) so the repo always contains a *playable* game even if the night runs short. Every milestone gets a git tag as a known-good fallback.
+Owner tags: **[CLAUDE]** overnight · **[TEAM]** needs a human · **[LATER]** deliberately deferred.
 
 ---
 
 ## 1. What the beta IS (scope contract)
 
-One place file, one small workshop site, the full §9.6 vertical slice with the dolls skin:
+One place file, one small workshop site:
 
-> Lobby room (stats above heads) → start a Shift → 3 dolls arrive → run each doll's 6-step care chain → watch for tells (real + fake) → hunt 3 glyphs with the detector → match the spirit in the Dollmaker's ledger → group-confirm the Banish Box → shift survived → next shift, harder. Strikes soften mistakes; The Presence maxing out ends the run with the scare. Best Shift + Patients cleared persist and display in the lobby.
+> Lobby (stats above heads) → ready-up pad → Shift starts → 3 dolls on the bench → run each doll's care chain → watch for tells (real + fake) → hunt glyphs with the detector → match the spirit in the ledger → group-confirm the Banish Box → correct = shift survived → next shift, harder. Strikes soften mistakes; The Presence maxing out ends the run with the scare. Stats persist (once published) and display in the lobby.
 
-Solo playable; up to 4 players co-op in one server. Mobile + PC input. Everything visual is code-built low-poly placeholder (parts-based dolls and rooms) — the team replaces looks later with Meshy/Toolbox assets; the *game* is fully real.
+Solo-first (the team's first test is solo Play), up to 4-player co-op. Mobile-friendly (touch-only playable). All visuals are code-built placeholders; the *game* is real.
 
 ## 2. Honest capability split
 
-**Claude CAN do overnight, from this cloud environment:**
-- 100% of the game code (Luau, server + client), the entire systems list below
-- Build the whole map procedurally from parts (workshop interior, lobby, furniture, Banish Box) — no Studio needed
-- Parts-based placeholder dolls (distinct silhouettes/colors per doll) with code-driven motion for tells
-- All UI (HUD, minigames, ledger, recap) built via code (no image assets required)
-- Lighting/atmosphere (fog, flicker, color grading by Presence tier) and audio *wiring* (every sound is a config entry pointing at a Roblox catalog asset ID — defaults set, team-swappable)
-- Static validation: `rojo build` the place file + Luau static analysis (will install the toolchain in the cloud container; if the network blocks it, validation falls back to review-only and the team's first Studio open is the real test)
-- Commit + push everything to this branch, with a written playtest guide
+**Claude CAN do overnight:** 100% of the code; the whole map procedurally from parts; parts-based doll rigs with procedural (tweened) motion; all UI via code; lighting/atmosphere; audio *wiring*; static validation (rojo build + luau analysis — verified feasible in this container via direct binary downloads); unit tests for the pure-logic deduction core (Luau CLI); commit/push + a built `.rbxlx` artifact so the team can double-click open.
 
-**Claude CANNOT do from here (physics of the situation, not policy):**
-- Actually RUN the game — this environment has no Roblox runtime. First real playtest is the team's, in Studio. Expect bugs on first open; report them and Claude fixes in rounds
-- Publish the place, create the game on the group, fill the maturity questionnaire, create game passes/dev products/badges, upload images/meshes/audio — all dashboard/Studio actions **[TEAM]**
-- Make real art: mesh dolls, the Dollmaker model, icons/thumbnails **[TEAM + Meshy/ChatGPT pipeline]**
+**Claude CANNOT do from here:** run the game (no Roblox runtime — the team's Studio session tomorrow is the FIRST run ever; a bug-fix round is expected and planned for); publish/create the experience, questionnaire, dashboard products **[TEAM]**; real art/audio assets **[TEAM + Meshy]**; upload ANY assets — which forces three hard constraints baked into every item below: **zero Animation assets** (all motion is procedural TweenService/Motor6D), **zero image assets** (drawings/glyphs/marks are SurfaceGui compositions or part geometry; moonlight via SpotLight through translucent parts, never texture-less Beams), **zero hardcoded catalog audio IDs** (all cues ship ID=0 + silent no-op; only built-in `rbxasset://` files hardcoded; every audio tell has a visual co-cue).
 
----
+## 3. Engineering rules (apply to every item; from the critique)
 
-## 3. THE BUILD CHECKLIST
-
-### 3.0 Foundation
-- [x] Rojo project scaffold, folder structure, Git repo **[CLAUDE]** *(done pre-plan)*
-- [ ] Shared config module (all tunables in one file: timings, meter rates, strike count, escalation curve) **[CLAUDE]**
-- [ ] Remote event/function registry with server-side validation on every remote **[CLAUDE]**
-- [ ] Definition modules: 6 spirits (3-glyph ordered codes), 6 care steps, tell types (real + fake), haunt event pool, glyph set (original cartoon glyphs, no real occult symbols) **[CLAUDE]**
-- [ ] Luau toolchain in cloud container (rojo build + static analysis) — best effort **[CLAUDE]**
-
-### 3.1 Map (code-built, placeholder-visual)
-- [ ] Lobby room: spawn area, stats billboards, shift-start door/pad **[CLAUDE]**
-- [ ] Workshop site: main workbench room, doll storage alcove, ledger desk, back hallway, Banish Box room (~5 spaces, small & dense) **[CLAUDE]**
-- [ ] Atmosphere pass: dim warm lighting, dust motes, flickering lamps, window moonlight, fog **[CLAUDE]**
-- [ ] Parts-based doll models ×6 visual variants (distinct silhouette + palette so tells are readable) **[CLAUDE]**
-- [ ] Replace parts-dolls with Meshy/Toolbox meshes **[TEAM, post-beta]**
-
-### 3.2 Shift loop (the state machine)
-- [ ] States: LobbyIdle → ShiftIntro → ShiftActive → BanishDecision → ShiftResult → (next shift | RunEnd) **[CLAUDE]**
-- [ ] 3 dolls per shift spawn on the bench; count/difficulty escalate per shift (more fake tells, faster Presence, +1 doll at defined milestones) **[CLAUDE]**
-- [ ] Strike system: wrong banish / missed final ribbon step = strike + scare, not instant fail; run ends at strike cap or Presence max **[CLAUDE]**
-- [ ] Perfect-shift tracking (no strikes, all steps correct) as bonus stat **[CLAUDE]**
-- [ ] Solo scaling: fewer simultaneous tells, slower meter when 1 player **[CLAUDE]**
-
-### 3.3 Care chain (the hands-busy half)
-- [ ] 6 order-gated steps per doll, each a 5–15s ProximityPrompt minigame: Brush hair → Polish eyes → Paint face → Dress → Wind music box → **Tie the silver ribbon** (the "reagent" — forgettable on purpose) **[CLAUDE]**
-- [ ] Touch-first minigame interactions (tap/hold/drag-free; no keyboard requirements) **[CLAUDE]**
-- [ ] Per-doll progress checklist on the HUD; naming prompt when a doll is first picked up **[CLAUDE]**
-
-### 3.4 Deduction layer (the eyes-busy half)
-- [ ] Marked-doll selection per shift; real tells scheduler (head turn when unwatched, eyes follow, position shift between glances, music box self-play, marks appearing) **[CLAUDE]**
-- [ ] **Fake tells on innocent dolls** (framing), rate scales with shift number **[CLAUDE]**
-- [ ] Moves-when-unwatched logic (line-of-sight check across all players — the Weeping Angels rule) **[CLAUDE]**
-- [ ] Detector toy: held tool, rattle/glow intensity by distance to hidden glyphs **[CLAUDE]**
-- [ ] 3 glyph tokens, randomized spawn points per shift **[CLAUDE]**
-- [ ] Dollmaker's ledger UI: 6 spirit entries, ordered 3-glyph codes, player slots found glyphs to match **[CLAUDE]**
-
-### 3.5 The Presence (meter + haunts)
-- [ ] Hidden meter: constant fill + surge-on-rush rubber-band + acceleration after last doll finished **[CLAUDE]**
-- [ ] Diegetic readout only (no bar): lighting warms→sickens, lamp flicker rate, music detune, wall drawings change at tier thresholds **[CLAUDE]**
-- [ ] Haunt system: ~8 launch events (peripheral silhouette, door creak-slam, lights-out beat, doll head snap, whisper pass, window figure, music box swell, bench rattle), tier-gated random draws, cooldowns, never during minigame lock **[CLAUDE]**
-- [ ] "Taken" sequence (1 co-op event): a player is pulled to the dark mirror-room for a 20s escape minigame; friends see them sleepwalking and can shake them awake **[CLAUDE]**
-- [ ] The scare (run end): lights die, The Dollmaker's true face (placeholder model + sound), recap card **[CLAUDE]**
-
-### 3.6 Banish
-- [ ] Banish Box in its own room; carry/wheel the chosen doll in **[CLAUDE]**
-- [ ] All-players confirm UI (with a 10s solo-override so solo isn't blocked) **[CLAUDE]**
-- [ ] Resolution: correct doll + correct glyph order + ribbon tied = banished (shift survived); anything wrong = strike + consequence scare; reveal card shows the doll's NAME ("MR. BUTTONS WAS THE HOLLOW ONE") **[CLAUDE]**
-
-### 3.7 Persistence & lobby social proof
-- [ ] DataStore: best shift, total dolls cleared, perfect shifts, runs played (with retry/session-locking hygiene) **[CLAUDE]**
-- [ ] Lobby billboards above heads: "Best Shift: N" **[CLAUDE]**
-- [ ] Lobby leaderboard board (top best-shift this server) **[CLAUDE]**
-
-### 3.8 GUI/UX
-- [ ] HUD: shift number (big — it's the thumbnail), doll checklists, strikes, held-item slot **[CLAUDE]**
-- [ ] Shift intro/result banners, end-of-run recap card (shift reached, dolls cleared, traitor name + reveal shift, closest call) **[CLAUDE]**
-- [ ] Naming prompt with filter via Roblox TextService (required for kid safety) **[CLAUDE]**
-- [ ] Mobile layout pass: thumb-reachable prompts, no tiny targets; PC bindings **[CLAUDE]**
-- [ ] Panic emote button (character voice bark placeholder) **[CLAUDE]**
-
-### 3.9 Audio (wired, swappable)
-- [ ] SoundConfig module: every cue one line — ambience bed, tier layers, detector rattle, music box, stingers, reveal sting, Dollmaker scream **[CLAUDE]**
-- [ ] Default IDs from Roblox's free audio catalog; team swaps favorites later **[TEAM, post-beta]**
-
-### 3.10 Hygiene
-- [ ] Server-authoritative everything; remotes validated; no client trust on care steps/banish/stats **[CLAUDE]**
-- [ ] Streaming-safe, ~60s soft cleanup between shifts (no part leaks) **[CLAUDE]**
-- [ ] Playtest guide: `PLAYTEST.md` — how to open, sync, test solo + multiplayer, known-placeholder list, bug report template **[CLAUDE]**
+- **R1 — Solo is the golden path.** Every multiplayer gate has a solo/timeout fallback; the full loop completes with 1 player.
+- **R2 — Nothing blocks forever.** Every state has a Config watchdog max-duration (loud on-screen warning + force-advance); every minigame/interaction lock auto-releases.
+- **R3 — Everything has a kill switch.** Per-haunt `Enabled` flags, master flags per system (FakeTells, Detector, Naming, DataStore, Taken); every haunt execution pcall-wrapped so one bad event can't kill the scheduler.
+- **R4 — No raw strings across the wire.** Remote names exist once, as keys in one shared registry module; world instances reached via CollectionService tags/manifest, WaitForChild always with logged timeout. Final static grep pass checks every remote/path reference.
+- **R5 — DataStore failure is invisible to gameplay.** All calls pcall'd behind `Config.DataStoreEnabled`; in-memory fallback keeps billboards/recap working; PlayerAdded never waits on a DataStore.
+- **R6 — No free physics.** Doll carrying = massless/CanCollide-false weld to the carrier (or visual clone), never unanchored welds; detector = Handle tool, welded massless, CanBeDropped=false, passive Heartbeat intensity (no Activated dependency).
+- **R7 — Debug tooling ships day one** (it's for the team, not just Claude): chat commands behind `Config.DebugMode` + username allowlist (`/skipstate /shift N /reveal /completedoll /strike /presence N /haunt <name> /endrun /resetrun`), debug overlay (Presence value/tier, per-doll watched/unwatched, next haunt), error panel (last 10 errors via LogService, screenshot-able), version stamp (Config.Version + git hash + build time) in HUD corner.
+- **R8 — StreamingEnabled = false, explicitly** (tiny map; streaming is a [LATER] concern for the large site). Deprecated FilteringEnabled property removed from the project file.
 
 ---
 
-## 4. MORNING CHECKLIST **[TEAM]**
+## 4. THE BUILD — milestone checklist
 
-- [ ] Pull the branch (or download the built `.rbxlx` if the toolchain worked — see PLAYTEST.md)
-- [ ] Open in Studio, press Play — try a full run solo; then Test → 2+ players for co-op & the Taken event
-- [ ] Write down everything broken/confusing/boring (template in PLAYTEST.md) → send to Claude for fix rounds
-- [ ] Decide the real name (then Claude renames the project cleanly)
-- [ ] Start the Meshy pipeline: 6 dolls + The Dollmaker (concept images → 3D)
+### M0 — Toolchain FIRST (validation strategy for the whole night)
+- [ ] Download rojo 7.4.4 + luau analyzer binaries directly from GitHub release URLs (verified reachable; rokit needs the blocked API — skipped in container, rokit.toml kept for team machines) **[CLAUDE]**
+- [ ] `rojo build` the scaffold immediately; keep it green after every milestone **[CLAUDE]**
+- [ ] GitHub Actions workflow: rokit → rojo build → `.rbxlx` artifact on every push (backup path to a place file) **[CLAUDE]**
+- [ ] `dist/` exception in .gitignore; built `.rbxlx` committed every milestone so "download → double-click" always works **[CLAUDE]**
+- [ ] Fix default.project.json per R8 **[CLAUDE]**
 
-## 5. NOT in the beta **[LATER]** (deliberate)
+### M1 — TRACER BULLET: the loop closes (tag `m1-loop`)
+*Minimal form of every beat, fully wired: state machine + 1 doll + 1 care step + auto-filled ledger + banish + recap. If the night died here, the team could still play a round.*
+- [ ] Shared foundation: Config (every tunable), remote registry (R4), defs modules (6 spirits × ordered 3-glyph codes, care steps, tells, haunts, ~20 curated doll names) **[CLAUDE]**
+- [ ] Pure-logic core as `game`-free modules + Luau CLI unit tests: glyph-order matching, escalation curve, strike/Presence math, tell/haunt scheduling draws **[CLAUDE]**
+- [ ] Map builder: lobby + workshop (bench room, storage alcove, ledger desk, hallway, Banish Box room), per-room pcall segments, on-screen banner naming any failed segment; base lighting only **[CLAUDE]**
+- [ ] State machine per §3.2 of v1 plus the review's topology rules: ready-up pad zone w/ countdown starts the shift for players in the zone; workshop locks during ShiftActive ("Shift in progress" billboard); mid-shift joiners/lobby idlers auto-join at next ShiftIntro; empty participant set aborts to LobbyIdle with cleanup; watchdogs per R2 **[CLAUDE]**
+- [ ] 1 doll spawn (parts rig), 1 care step (brush hair) as ProximityPrompt minigame — prompts configured per review (Exclusivity, RequiresLineOfSight=false, MaxActivationDistance≈8, server occupancy lock, Enabled toggled during minigames), dolls spaced 4+ studs **[CLAUDE]**
+- [ ] Banish flow v1: prompt-carry (R6) → Box room → confirm UI (quorum = present players, recomputed on leave; all-confirm OR majority + visible 30s timer; solo = 10s override) → staged resolution beat (music hard-cut → sting slot → camera focus → name card slam: "MR. BUTTONS WAS THE HOLLOW ONE" / "…WAS INNOCENT") **[CLAUDE]**
+- [ ] **Shift-survival rule (fixed per review):** Banish Box unlocks only when every doll's care chain is complete; correct banish → shift++ ; **wrong banish → strike + Presence surge + the innocent doll is consumed + return to ShiftActive** (banish again until correct or Presence maxes); counter increments only on correct banish **[CLAUDE]**
+- [ ] Leave/reset glue (review): central PlayerRemoving/Died/CharacterAdded — carried doll dropped in place (never destroyed), detector respawns at rack, minigame locks released, mid-shift respawns at workshop spawn **[CLAUDE]**
+- [ ] Minimal HUD: shift number, objective line (state-driven FTUE: "Care for the dolls" → "Find the glyphs" → "Match the ledger" → "Banish"), strikes, recap card; lobby chalkboard with the four beats **[CLAUDE]**
+- [ ] rojo build green + logic tests pass + commit + tag **[CLAUDE]**
 
-Large site + two-queue matchmaking (after the loop proves fun) · monetization wiring (needs dashboard products first — code slots are stubbed ready) · Moments/Captures API hooks · badges · streamer-safe toggle · seasonal events · additional spirits (6→12), haunts, care steps · private-server perks · real art/audio pass · publishing + questionnaire + Kids/Select track (MASTER.md §3).
+### M2 — The real game: deduction + full care chain (tag `m2-deduction`)
+- [ ] All care steps as distinct touch minigames — **5 listed steps** (Brush hair → Polish eyes → Paint face → Dress → Wind music box); doll reads "DONE" after 5; **the silver ribbon is a separate, un-listed 6th act** the banish silently requires (taught once on the lobby chalkboard/ledger page) — preserves the forgettable-reagent dread (review fix) **[CLAUDE]**
+- [ ] Doll naming: tap-to-pick from curated list (default name auto-assigned at spawn so reveals are never blank); optional free-text behind pcall'd FilterStringAsync + GetNonChatStringForBroadcastAsync (broadcast filter — the correct one), timeout-defaulted, dialog anchored top-half (mobile keyboard); Studio-filters-nothing note in PLAYTEST **[CLAUDE]**
+- [ ] Tells: marked-doll selection; real-tell scheduler (head snap, eyes follow, position shift between glances, music-box crank visibly turning = the audio tell's visual co-cue, marks appearing as SurfaceGui doodles); **fake tells on innocents**, rate scales per shift **[CLAUDE]**
+- [ ] Moves-when-unwatched: client streams Camera CFrame ~8 Hz via UnreliableRemoteEvent → server sanity-checks (camera near head) → authoritative FOV-cone + occlusion raycast → doll movable only when no validated camera sees it; HRP-facing-cone fallback for silent clients; per-doll watched status on the debug overlay so the team can verify the rule in 30 seconds **[CLAUDE]**
+- [ ] Detector + glyphs: R6 tool; passive rattle intensity from server-replicated glyph *positions*; 3 randomized glyph spawns; **found-set is server-authoritative shared state** — every player's ledger shows it + "Glyph found" notification (review fix: co-op split works) **[CLAUDE]**
+- [ ] Ledger UI: 6 spirits, ordered codes, slot-the-found-glyphs matching **[CLAUDE]**
+- [ ] Solo scaling: doll count capped at 3 solo; fewer simultaneous tells; slower meter **[CLAUDE]**
+- [ ] rojo build + tests + commit + tag **[CLAUDE]**
+
+### M3 — The Presence: fear + escalation (tag `m3-presence`)
+- [ ] Hidden meter: constant fill + rush-surge rubber-band + last-doll acceleration; strikes surge it; server replicates a single PresenceTier IntValue — **each client renders its own** flicker/detune/color-grade locally (review fix: no global-lighting fights, no replication spam) **[CLAUDE]**
+- [ ] Diegetic tier feedback: lighting warms→sickens, lamp flicker rate, wall doodles change (SurfaceGui), music detune slot **[CLAUDE]**
+- [ ] Haunt scheduler: tier-gated random draws, cooldowns, never during minigame lock, R3 kill switches; ~8 events (peripheral silhouette, door creak-slam, lights-out beat, doll head snap, whisper pass slot, window figure, music-box swell, bench rattle) **[CLAUDE]**
+- [ ] **Taken sequence: STUB ONLY tonight (review cut):** trance-in-place (screen darkens, tap-to-wake or friend-shake prompt, guaranteed 20s auto-release, never run-ending; excluded from solo draw pool), behind `Config.Haunts.TakenEnabled = false` by default — full mirror-room version is the first post-playtest feature **[CLAUDE]**
+- [ ] Run-end scare: lights die, The Dollmaker placeholder reveal + scream slot, recap card (shift reached, dolls cleared, traitor name + reveal shift, closest call) **[CLAUDE]**
+- [ ] Atmosphere pass (moved here from v1 plan): dust motes (default particle sparkle), SpotLight moonlight, fog **[CLAUDE]**
+- [ ] rojo build + tests + commit + tag **[CLAUDE]**
+
+### M4 — Persistence, polish, handoff (tag `m4-beta`)
+- [ ] DataService per R5: UpdateAsync merge-only (bestShift = max, counters = sums — no session locking, deliberately, per review), 3-retry backoff reads, flush on PlayerRemoving + BindToClose; stats: best shift, dolls cleared, perfect shifts, runs **[CLAUDE]**
+- [ ] Lobby social proof: head billboards on every CharacterAdded (Adornee=Head, DisplayDistanceType=None, lobby-scoped), **two lines: "Best Shift: N / Dolls Cleared: M"** (review fix), async-safe; top-best-shift server leaderboard board **[CLAUDE]**
+- [ ] SoundConfig: every cue one line, all IDs = 0 + TODO, silent no-op on unset/failed; rbxasset:// built-ins for detector tick + UI clicks; in-Studio **audio test board** (one button per cue) for the team's 20-minute fill session **[CLAUDE]**
+- [ ] Panic emote button (procedural pose + screen shake + voice bark slot) **[CLAUDE]**
+- [ ] Mobile pass, timeboxed per review: touch-only playable, no keyboard requirements, minigame GUIs bottom-anchored for thumbs; deeper device polish [LATER] **[CLAUDE]**
+- [ ] R4 static sweep: grep every remote reference against the registry, every tagged path against the map builder **[CLAUDE]**
+- [ ] `PLAYTEST.md` with the review-mandated contents: **expected weirdness list** (empty baseplate in edit mode is NORMAL — world builds on Play; silent audio; placeholder dolls), click-by-click open steps (.rbxlx download path AND repo/Rojo path), Studio multi-client steps (Test → Clients and Servers → 2), **publish-to-private-place + Enable Studio API Services step for persistence** (local play is memory-only BY DESIGN), DebugMode how-to + full command list, kill-switch flag table ("if X misbehaves set Y=false"), audio fill guide, bug template (version stamp + error-panel screenshot), milestone fallback tags **[CLAUDE]**
+- [ ] Final: rojo build, commit `dist/PorcelainBeta.rbxlx`, tag, push **[CLAUDE]**
 
 ---
 
-*Checklist maintained by Claude during the overnight build — every `[x]` lands as a commit on this branch.*
+## 5. MORNING CHECKLIST [TEAM]
+
+- [ ] Read PLAYTEST.md first (2 min — it prevents 90% of false bug reports)
+- [ ] Download `dist/PorcelainBeta.rbxlx` from the branch → double-click → press Play → full solo run
+- [ ] Test → Clients and Servers → 2 players → co-op run (banish quorum, shared ledger, shake-awake stub)
+- [ ] File bugs via the PLAYTEST.md template → send to Claude → fix rounds begin
+- [ ] Publish to a **private** place + enable Studio API access when ready to test persistence
+- [ ] 20-min audio fill session from Creator Store (test board included)
+- [ ] Decide the real name · start Meshy pipeline (6 dolls + The Dollmaker)
+
+## 6. NOT in the beta [LATER] (deliberate)
+
+Full mirror-room Taken sequence (stub ships tonight) · large site + two-queue matchmaking · custom prompt styling ("thumb-zone" prompts) · real session locking (needed only when economy data exists) · monetization wiring (needs dashboard products) · Moments/Captures hooks · badges · streamer-safe toggle · StreamingEnabled revisit for the large site · seasonal events · spirits 6→12 · real art/audio/animations (animations REQUIRE Studio upload — all beta motion is procedural by constraint) · publishing + questionnaire + Kids/Select track (MASTER.md §3).
+
+---
+
+*Checklist maintained by Claude during the overnight build — every `[x]` and tag lands as a commit on this branch.*
